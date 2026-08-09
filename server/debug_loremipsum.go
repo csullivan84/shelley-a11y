@@ -84,10 +84,7 @@ func (s *Server) handleDebugLoremIpsum(w http.ResponseWriter, r *http.Request) {
 
 	model := strings.TrimSpace(r.FormValue("model"))
 	if model == "" {
-		model = s.defaultModel
-	}
-	if model == "" {
-		model = "claude-opus-4-5-20251101"
+		model = s.effectiveDefaultModel(s.getModelList())
 	}
 
 	// Detach from the request context so a client disconnect mid-generation
@@ -290,6 +287,10 @@ func (g *loremGen) recordTyped(messageType db.MessageType, msg llm.Message, usag
 		}
 	}
 	markAgentDone := (messageType == db.MessageTypeAgent || messageType == db.MessageTypeError) && msg.EndOfTurn
+	// Stamp created_at from the same synthetic clock as this message's own
+	// tool/usage timestamps (see usage() and turn()'s per-tool ticks), not
+	// the DB default (real insertion time) — see db.CreateMessageParams.CreatedAt.
+	createdAt := g.tick(200 * time.Millisecond)
 	g.pending = append(g.pending, db.CreateMessageParams{
 		ConversationID:      g.convID,
 		Type:                messageType,
@@ -301,6 +302,7 @@ func (g *loremGen) recordTyped(messageType db.MessageType, msg llm.Message, usag
 		DisplayData:         ExtractDisplayData(msg),
 		ExcludedFromContext: msg.ExcludedFromContext,
 		MarkAgentDone:       markAgentDone,
+		CreatedAt:           &createdAt,
 		// No BumpTimestamp: flush's CreateMessages bumps the conversation
 		// timestamp once at the end of the batch Tx, so a per-message bump
 		// would be a redundant write.

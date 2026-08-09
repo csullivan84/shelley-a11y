@@ -136,6 +136,7 @@ export const en: TranslationKeys = {
   manageModelsAction: "Manage models…",
   effortLabel: "Reasoning effort",
   effortAuto: "auto",
+  modelSwitchBusy: "Finish or stop the current turn to switch models",
   customModelsGroup: "Custom models",
   editModel: "Edit Model",
   loadingModels: "Loading models...",
@@ -256,6 +257,9 @@ export const en: TranslationKeys = {
   editUserAgentsMd: "Edit User AGENTS.md",
   editFile: "Edit File…",
 
+  editFileShortcut: "Open the file finder",
+  editFileShortcutFirefox:
+    "Firefox reserves this shortcut for a private window — use the command palette (Cmd/Ctrl+K) instead",
   openConversations: "Open conversations",
   expandSidebar: "Expand sidebar",
 

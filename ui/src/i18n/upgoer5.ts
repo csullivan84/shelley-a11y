@@ -136,6 +136,7 @@ export const upgoer5: TranslationKeys = {
   manageModelsAction: "Set up brains…",
   effortLabel: "How hard to think",
   effortAuto: "brain picks",
+  modelSwitchBusy: "Let the computer finish, or stop it, before you pick a new brain",
   customModelsGroup: "Your own brains",
   editModel: "Change Brain",
   loadingModels: "Getting brains...",
@@ -255,6 +256,9 @@ export const upgoer5: TranslationKeys = {
   editUserAgentsMd: "Change your helper words file",
   editFile: "Change a words file…",
 
+  editFileShortcut: "Open the box that finds files",
+  editFileShortcutFirefox:
+    "This computer program keeps this key press for its own hidden window — use the big command box (Cmd/Ctrl+K) instead",
   openConversations: "Open talks",
   expandSidebar: "Make side bigger",
 

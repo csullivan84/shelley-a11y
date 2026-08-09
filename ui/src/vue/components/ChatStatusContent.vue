@@ -63,22 +63,10 @@
         <span class="status-stop-label">{{ cancelling ? "Cancelling..." : "Stop" }}</span>
       </button>
     </div>
-    <span
-      v-if="currentConversation?.cwd || selectedCwd"
-      class="status-cwd-readonly hide-on-mobile"
-      :title="currentConversation?.cwd || selectedCwd"
-    >
-      {{ tildifyPath(currentConversation?.cwd || selectedCwd) }}
-    </span>
-    <ContextUsageBar
-      :context-window-size="contextWindowSize"
-      :max-context-tokens="maxContextTokens"
+    <StatusReadout
+      v-bind="readoutProps"
+      :cwd="cwd"
       :conversation-id="conversationId"
-      :model-name="selectedModelDisplayName"
-      :usage-entries="usageEntries"
-      :other-usage-rows="otherUsageRows"
-      :on-distill-new-generation="onDistillNewGeneration"
-      :on-start-new-generation="onStartNewGeneration"
       :agent-working="agentWorking"
     />
   </div>
@@ -124,7 +112,12 @@
             />
           </svg>
         </button>
-        <div v-if="showAdvancedSettings" class="advanced-settings-popover">
+        <div
+          v-if="showAdvancedSettings"
+          ref="advancedPopoverRef"
+          class="advanced-settings-popover"
+          :style="popoverStyle"
+        >
           <div class="advanced-settings-header">
             <span>Tools</span>
             <button
@@ -184,37 +177,25 @@
     <span class="status-message status-ready">
       <span class="hide-on-mobile">Ready on </span>{{ hostname }}
     </span>
-    <span
-      v-if="currentConversation?.cwd || selectedCwd"
-      class="status-cwd-readonly hide-on-mobile"
-      :title="currentConversation?.cwd || selectedCwd"
-    >
-      {{ tildifyPath(currentConversation?.cwd || selectedCwd) }}
-    </span>
-    <ContextUsageBar
-      :context-window-size="contextWindowSize"
-      :max-context-tokens="maxContextTokens"
+    <StatusReadout
+      v-bind="readoutProps"
+      :cwd="cwd"
       :conversation-id="conversationId"
-      :model-name="selectedModelDisplayName"
-      :usage-entries="usageEntries"
-      :other-usage-rows="otherUsageRows"
-      :on-distill-new-generation="onDistillNewGeneration"
-      :on-start-new-generation="onStartNewGeneration"
       :agent-working="agentWorking"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from "vue";
+import { computed, ref, watch, onUnmounted, nextTick } from "vue";
 import type { Conversation } from "../../types";
 import type { OtherUsageRow, UsageEntry } from "../../utils/tokenCostGraph";
 import { tildifyPath } from "../../utils/tildify";
 import { useI18n } from "../composables/i18n";
 import type { ThinkingLevel } from "./thinkingLevel";
 import AnimatedWorkingStatus from "./AnimatedWorkingStatus.vue";
-import ContextUsageBar from "./ContextUsageBar.vue";
 import ModelPicker from "./ModelPicker.vue";
+import StatusReadout from "./StatusReadout.vue";
 
 type ModelInfo = {
   id: string;
@@ -240,7 +221,6 @@ const props = defineProps<{
   maxContextTokens: number;
   usageEntries: UsageEntry[];
   otherUsageRows: OtherUsageRow[];
-  selectedModelDisplayName: string;
   hostname: string;
   models: ModelInfo[];
   selectedModel: string;
@@ -258,19 +238,81 @@ const props = defineProps<{
   onDistillNewGeneration?: () => Promise<void> | void;
   onStartNewGeneration: () => Promise<void> | void;
   onSelectModel: (model: string) => void;
+  /** Model / reasoning-level picks from the status readout, which only renders
+   *  for an existing conversation — different operations from onSelectModel and
+   *  onThinkingChange, which are client-side only (see sendModelCommand in
+   *  ChatInterface). */
+  onSwitchConversationModel: (model: string) => void;
+  onSwitchConversationThinkingLevel: (level: ThinkingLevel) => void;
   onManageModels: () => void;
   onRefreshModels: () => void;
   onThinkingChange: (level: ThinkingLevel) => void;
   onSetToolOverride: (name: string, value: "default" | "on" | "off") => void;
   onResetToolOverrides: () => void;
   onOpenDirectoryPicker: () => void;
+  /** Told before the context usage popup opens, so ChatInterface can start
+   *  computing the cost graph's usage entries (see usageWanted there). */
+  onUsageNeeded: () => void;
 }>();
 
 const { t } = useI18n();
 
+// The conversation's cwd once saved, the picked one while it is still a draft.
+const cwd = computed(() => props.currentConversation?.cwd || props.selectedCwd);
+
+// Props bundle for the two StatusReadout call sites (idle and agent-working
+// branches). Everything here is identical between them; the branch-specific
+// bits are passed separately at each site.
+const readoutProps = computed(() => ({
+  contextWindowSize: props.contextWindowSize,
+  maxContextTokens: props.maxContextTokens,
+  usageEntries: props.usageEntries,
+  otherUsageRows: props.otherUsageRows,
+  models: props.models,
+  selectedModel: props.selectedModel,
+  thinkingLevel: props.thinkingLevel,
+  refreshingModels: props.refreshingModels,
+  onDistillNewGeneration: props.onDistillNewGeneration,
+  onStartNewGeneration: props.onStartNewGeneration,
+  onUsageNeeded: props.onUsageNeeded,
+  onSwitchConversationModel: props.onSwitchConversationModel,
+  onSwitchConversationThinkingLevel: props.onSwitchConversationThinkingLevel,
+  onManageModels: props.onManageModels,
+  onRefreshModels: props.onRefreshModels,
+}));
+
 // Local advanced-settings popover state + outside-click close.
 const showAdvancedSettings = ref(false);
 const advancedSettingsRef = ref<HTMLDivElement | null>(null);
+const advancedPopoverRef = ref<HTMLDivElement | null>(null);
+// Horizontal offset (relative to the gear wrapper) that keeps the popover
+// within the viewport. The gear sits toward the left of the status bar, so a
+// static CSS anchor either overflows off the left edge (right-anchored) or off
+// the right edge on narrow desktop widths (left-anchored) — hence we measure.
+const popoverStyle = ref<Record<string, string>>({});
+function positionPopover() {
+  const wrapper = advancedSettingsRef.value;
+  const popover = advancedPopoverRef.value;
+  if (!wrapper || !popover) return;
+  // The mobile media query pins the popover with position:fixed; don't fight
+  // it. Use documentElement.clientWidth (scrollbar-excluded) so this boundary
+  // matches the CSS @media (max-width: 640px) exactly.
+  const viewportWidth = document.documentElement.clientWidth;
+  if (viewportWidth <= 640) {
+    popoverStyle.value = {};
+    return;
+  }
+  const margin = 8;
+  const wrapRect = wrapper.getBoundingClientRect();
+  const width = popover.offsetWidth;
+  const maxLeft = viewportWidth - margin - width;
+  // Prefer aligning the popover's left edge to the gear, clamped into view.
+  const desiredLeft = Math.max(margin, Math.min(wrapRect.left, maxLeft));
+  popoverStyle.value = {
+    left: `${Math.round(desiredLeft - wrapRect.left)}px`,
+    right: "auto",
+  };
+}
 function onOutside(e: MouseEvent) {
   if (advancedSettingsRef.value && !advancedSettingsRef.value.contains(e.target as Node)) {
     showAdvancedSettings.value = false;
@@ -278,9 +320,19 @@ function onOutside(e: MouseEvent) {
 }
 watch(showAdvancedSettings, (open) => {
   document.removeEventListener("mousedown", onOutside);
-  if (open) document.addEventListener("mousedown", onOutside);
+  window.removeEventListener("resize", positionPopover);
+  if (open) {
+    document.addEventListener("mousedown", onOutside);
+    window.addEventListener("resize", positionPopover);
+    nextTick(positionPopover);
+  } else {
+    popoverStyle.value = {};
+  }
 });
-onUnmounted(() => document.removeEventListener("mousedown", onOutside));
+onUnmounted(() => {
+  document.removeEventListener("mousedown", onOutside);
+  window.removeEventListener("resize", positionPopover);
+});
 
 function currentOverride(name: string): "default" | "on" | "off" {
   return props.toolOverrides[name] || "default";

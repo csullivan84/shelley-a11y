@@ -136,6 +136,7 @@ export const vi: TranslationKeys = {
   manageModelsAction: "Quản lý models…",
   effortLabel: "Mức độ suy nghĩ",
   effortAuto: "tự động",
+  modelSwitchBusy: "Hoàn tất hoặc dừng lượt hiện tại để đổi mô hình",
   customModelsGroup: "Models tùy chỉnh",
   editModel: "Chỉnh sửa model",
   loadingModels: "Đang tải danh sách models...",
@@ -255,6 +256,9 @@ export const vi: TranslationKeys = {
   editUserAgentsMd: "Chỉnh sửa AGENTS.md",
   editFile: "Chỉnh sửa tệp…",
 
+  editFileShortcut: "Mở trình tìm tệp",
+  editFileShortcutFirefox:
+    "Firefox dành phím tắt này cho cửa sổ riêng tư — hãy dùng bảng lệnh (Cmd/Ctrl+K)",
   openConversations: "Mở lịch sử trò chuyện",
   expandSidebar: "Mở rộng sidebar",
 

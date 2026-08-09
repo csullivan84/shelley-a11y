@@ -136,6 +136,7 @@ export const ja: TranslationKeys = {
   manageModelsAction: "モデルの管理…",
   effortLabel: "思考量",
   effortAuto: "自動",
+  modelSwitchBusy: "モデルを切り替えるには、現在のターンを終了または停止してください",
   customModelsGroup: "カスタムモデル",
   editModel: "モデルの編集",
   loadingModels: "モデルを読み込み中...",
@@ -254,6 +255,9 @@ export const ja: TranslationKeys = {
   editUserAgentsMd: "ユーザー AGENTS.md を編集",
   editFile: "ファイルを編集…",
 
+  editFileShortcut: "ファイルファインダーを開く",
+  editFileShortcutFirefox:
+    "Firefox はこのショートカットをプライベートウィンドウ用に予約しています。コマンドパレット（Cmd/Ctrl+K）を使用してください",
   openConversations: "会話を開く",
   expandSidebar: "サイドバーを展開",
 

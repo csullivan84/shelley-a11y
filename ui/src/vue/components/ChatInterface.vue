@@ -74,7 +74,6 @@
         <!-- Overflow menu (PrimeVue Popover + SelectButton/Select) -->
         <ChatOverflowMenu
           :has-cwd="hasCwd"
-          :terminal-url="terminalURL"
           :links="links"
           :can-archive="
             !!(conversationId && onArchiveConversation && !currentConversation?.archived)
@@ -83,7 +82,7 @@
           :has-update="hasUpdate"
           @open-diffs="showDiffViewer = true"
           @open-git-graph="showGitGraph = true"
-          @open-terminal="openTerminalUrl"
+          @open-terminal="openInAppTerminal"
           @open-external-link="openExternalLink"
           @archive="archiveFromMenu"
           @export="openExport"
@@ -97,7 +96,7 @@
     <!-- Messages area. Positioning wrapper is NOT the transcript region —
          floating TOC/scroll controls sit as siblings so focusing them does
          not also announce "Conversation transcript region". -->
-    <div class="messages-area-wrapper">
+    <div class="messages-area-wrapper" :aria-busy="loading">
       <div
         class="messages-transcript-region"
         role="region"
@@ -120,42 +119,7 @@
         tabindex="-1"
         @focusin="markTranscriptReviewed"
       >
-        <template v-if="loading">
-          <div v-if="showLoadingProgressUI" class="conversation-loading full-height">
-            <div class="spinner" />
-            <div class="conversation-loading-title">
-              {{
-                loadingProgress?.phase === "parsing"
-                  ? "Rendering conversation\u2026"
-                  : "Loading conversation\u2026"
-              }}
-            </div>
-            <div class="conversation-loading-subtitle">
-              <template v-if="loadingProgress">
-                <template v-if="loadingProgress.bytesTotal && loadingProgress.bytesTotal > 0">
-                  {{ formatBytes(loadingProgress.bytesDownloaded) }} of
-                  {{ formatBytes(loadingProgress.bytesTotal) }}
-                </template>
-                <template v-else
-                  >{{ formatBytes(loadingProgress.bytesDownloaded) }} downloaded</template
-                >
-              </template>
-              <template v-else>Starting…</template>
-              {{
-                lastKnownMessageCount !== null
-                  ? ` \u2022 ~${lastKnownMessageCount} messages last time`
-                  : ""
-              }}
-            </div>
-            <div class="conversation-loading-bar">
-              <div :class="loadingBarFillClass" :style="loadingBarFillStyle" />
-            </div>
-          </div>
-          <div v-else class="flex items-center justify-center full-height">
-            <div class="spinner" />
-          </div>
-        </template>
-        <div v-else ref="messagesListRef" class="messages-list">
+        <div v-if="!loading || renderingConversation" ref="messagesListRef" class="messages-list">
           <!-- empty state -->
           <div v-if="messages.length === 0" class="empty-state">
             <div class="empty-state-content">
@@ -267,6 +231,43 @@
           <div ref="bottomSentinelRef" class="messages-bottom-sentinel" aria-hidden="true" />
         </div>
       </div>
+      </div>
+
+      </div>
+        </div>
+      </div>
+
+      <div v-if="loading" class="conversation-loading-overlay">
+        <div v-if="showLoadingProgressUI" class="conversation-loading">
+          <div class="spinner" />
+          <div class="conversation-loading-title" role="status" aria-live="polite">
+            {{
+              loadingProgress?.phase === "parsing"
+                ? "Rendering conversation\u2026"
+                : "Loading conversation\u2026"
+            }}
+          </div>
+          <div class="conversation-loading-subtitle">
+            <template v-if="loadingProgress">
+              <template v-if="loadingProgress.bytesTotal && loadingProgress.bytesTotal > 0">
+                {{ formatBytes(loadingProgress.bytesDownloaded) }} of {{ formatBytes(loadingProgress.bytesTotal) }}
+              </template>
+              <template v-else>{{ formatBytes(loadingProgress.bytesDownloaded) }} downloaded</template>
+            </template>
+            <template v-else>Starting…</template>
+            {{
+              lastKnownMessageCount !== null
+                ? ` \u2022 ~${lastKnownMessageCount} messages last time`
+                : ""
+            }}
+          </div>
+          <div class="conversation-loading-bar">
+            <div :class="loadingBarFillClass" :style="loadingBarFillStyle" />
+          </div>
+        </div>
+        <div v-else class="flex items-center justify-center full-height">
+          <div class="spinner" />
+        </div>
       </div>
 
       <!-- Floating nav cluster: sibling of the transcript region, not a child. -->
@@ -399,6 +400,17 @@
       "
     />
 
+    <!-- Image annotation view. Opened by clicking any image in the
+         conversation (see composables/imageComment.ts); its comments land in
+         the message input like the diff viewer's. -->
+    <ImageCommentModal
+      v-if="imageCommentTarget"
+      :key="imageCommentTarget.src"
+      :target="imageCommentTarget"
+      @submit="(text) => (diffCommentText = text)"
+      @close="closeImageComment"
+    />
+
     <!-- Diff Viewer -->
     <DiffViewer
       :cwd="(diffViewerCwd || currentConversation?.cwd || selectedCwd) as string"
@@ -470,16 +482,21 @@ import { useDraftAutosave } from "../composables/draftAutosave";
 import { useFeatureFlag } from "../composables/featureFlags";
 import { useVersionChecker } from "../composables/versionChecker";
 import { provideToolProgress } from "../composables/toolProgress";
+import { closeImageComment, useImageCommentTarget } from "../composables/imageComment";
 import { focusMessageInputIfUnfocused } from "../../utils/focusMessageInput";
 import { buildMessageQuote } from "../../utils/messageQuote";
 import { hasMultipleUsers } from "../../utils/messageAuthors";
 import { tildifyPath } from "../../utils/tildify";
-import { prettyModelLabels } from "../../utils/modelNames";
 import { handleModifiedNavClick } from "../utils/openInNewTab";
 import { isAutoExpandTool } from "../../utils/toolMeta";
 import { formatDay } from "../../utils/messageTime";
 import { SLASH_COMMANDS } from "../../utils/slashCommands";
-import { perfCount, perfWrap } from "../../utils/perf";
+import {
+  perfCount,
+  perfRecordConversationLoad,
+  perfWrap,
+  type ConversationLoadSource,
+} from "../../utils/perf";
 import {
   aggregateOtherUsage,
   type OtherUsageEntry,
@@ -489,7 +506,7 @@ import {
 import { coalesceMessages, type CoalescedItem } from "./coalesce";
 import type { RenderNode, RenderChunk, GenerationBlock } from "./renderNode";
 import type { EphemeralTerminal } from "./terminalTypes";
-import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from "./thinkingLevel";
+import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS, type ThinkingLevel } from "./thinkingLevel";
 
 import MessageInput from "./MessageInput.vue";
 import ConversationTOC from "./ConversationTOC.vue";
@@ -498,11 +515,13 @@ import SystemPromptView from "./SystemPromptView.vue";
 import DirectoryPickerModal from "./DirectoryPickerModal.vue";
 import MessageSelectionToolbar from "./MessageSelectionToolbar.vue";
 import DiffViewer from "./DiffViewer.vue";
+import ImageCommentModal from "./ImageCommentModal.vue";
 import GitGraphViewer from "./GitGraphViewer.vue";
 import AgentsMdEditorModal from "./AgentsMdEditorModal.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import VersionChecker from "./VersionChecker.vue";
 import ChatOverflowMenu from "./ChatOverflowMenu.vue";
+import { matchChatInterfaceAction } from "../../utils/menuShortcuts";
 import MessageRenderNode from "./MessageRenderNode.vue";
 import QueuedGhostMessage from "./QueuedGhostMessage.vue";
 import ChatStatusContent from "./ChatStatusContent.vue";
@@ -570,7 +589,6 @@ const props = withDefaults(
 const { t } = useI18n();
 const { markdownMode } = useMarkdownMode();
 const toolPillsEnabled = useFeatureFlag("tool-pills");
-const tokenCostGraphEnabled = useFeatureFlag("token-cost-graph");
 const {
   hasUpdate,
   versionInfo,
@@ -613,11 +631,14 @@ const showUserEmails = computed(() => {
 });
 provide("showUserEmails", showUserEmails);
 const loading = ref(true);
+const renderingConversation = ref(false);
 const showLoadingProgressUI = ref(false);
 const loadingProgress = ref<{
-  phase: "downloading" | "parsing";
+  phase: "cache" | "downloading" | "parsing" | "rendering";
   bytesDownloaded: number;
   bytesTotal?: number;
+  messages?: number;
+  source?: ConversationLoadSource;
 } | null>(null);
 const sending = ref(false);
 const error = ref<string | null>(null);
@@ -751,12 +772,60 @@ function putDraftModel(draftId: string, model: string) {
       if (modelPutsInFlight === 0) modelPutDraftId = null;
     });
 }
-// setSelectedModel is the USER-pick path (composer picker). Server-driven
-// updates (conversation switch, /model echo) go through applyModel instead
-// — that split, not a value-equality guard, is what keeps echoes from
-// looping back into PUTs: an equality check against the (stale until the
-// echo lands) conversation row would drop a legitimate re-pick of the
-// original model made while a previous pick's PUT was still in flight.
+// Changing the model or reasoning level of a conversation that is already under
+// way. Both are server state at this point: they are baked into the agent loop
+// at build time, and conversation_options are locked once a conversation is
+// promoted (see the send path's `promoting` guard) — so a purely local change
+// would silently do nothing. /model already does the whole job for both:
+// validates the argument, rebuilds the loop, records a modelchange marker in the
+// log, and broadcasts the updated conversation, which the currentConversation
+// watch applies. So route through it rather than duplicating any of that, and
+// don't apply locally first: a rejected switch would visibly snap back.
+async function sendModelCommand(arg: string) {
+  const id = props.conversationId;
+  if (!id) return;
+  try {
+    await api.sendMessage(id, { message: `/model ${arg}`, model: selectedModel.value });
+  } catch (err) {
+    console.error("Failed to run /model:", err);
+    error.value = err instanceof Error ? err.message : "Failed to change model settings";
+  }
+}
+
+function switchConversationModel(model: string) {
+  if (model === selectedModel.value) return;
+  return sendModelCommand(model);
+}
+
+// Reasoning pills in the status readout's picker. Same policy as the model
+// above: don't touch local state, let the server's echo drive the pill, so a
+// rejected level doesn't leave the UI (and the stored default) claiming a
+// setting the conversation doesn't have.
+//
+// The "auto" sentinel is the exception. It means "defer to the model's own
+// default", which has no /model spelling ("default" there selects the default
+// MODEL), so it can only be applied locally. It's only offered when the model's
+// concrete default is unknown, in which case there's no level to send anyway.
+function switchConversationThinkingLevel(level: ThinkingLevel) {
+  // The pills are radios and re-emit on a click on the current one; without this
+  // guard that rebuilds the agent loop and appends a marker for a no-op.
+  if (level === thinkingLevel.value) return;
+  if (level === "default") {
+    setThinkingLevel(level);
+    return;
+  }
+  void sendModelCommand(level);
+}
+
+// Model pick from the composer's picker (new/draft conversations), where the
+// model is still purely client state until the first send.
+//
+// setSelectedModel is the USER-pick path. Server-driven updates (conversation
+// switch, /model echo) go through applyModel instead — that split, not a
+// value-equality guard, is what keeps echoes from looping back into PUTs: an
+// equality check against the (stale until the echo lands) conversation row
+// would drop a legitimate re-pick of the original model made while a previous
+// pick's PUT was still in flight.
 function setSelectedModel(model: string) {
   applyModel(model);
   // Keep the server-side draft row in sync with the picker. Without this,
@@ -787,6 +856,9 @@ const showAgentsMdEditor = ref(false);
 const diffViewerInitialCommit = ref<string | undefined>(undefined);
 const diffViewerCwd = ref<string | undefined>(undefined);
 const diffCommentText = ref("");
+// The image being annotated, if any (module state so any image in the message
+// tree can open the view without prop drilling).
+const imageCommentTarget = useImageCommentTarget();
 const agentWorking = ref(false);
 /** Tools that finished during the turn that just ended (for StatusAnnouncer). */
 const toolsCompletedThisTurn = ref(0);
@@ -845,6 +917,7 @@ let loadingProgressDelay: number | null = null;
 let currentConversationId: string | null = props.conversationId;
 let activeModelHealth: { modelId: string; startSequence: number; handledErrors: Set<string> } | null =
   null;
+let conversationLoadEpoch = 0;
 let catchingUp = false;
 // Layout-free "is the viewport at/near the bottom" signal, maintained by the
 // bottom sentinel's IntersectionObserver. Persisted (instead of a raw scrollTop)
@@ -878,7 +951,6 @@ let lastScrollGestureAt = -Infinity;
 let hiddenAt: number | null = null;
 let lastGeneration: { id: string | null; gen: number } | null = null;
 
-const terminalURL = window.__SHELLEY_INIT__?.terminal_url || null;
 const links = window.__SHELLEY_INIT__?.links || [];
 const hostname = window.__SHELLEY_INIT__?.hostname || "localhost";
 
@@ -1012,10 +1084,6 @@ const isDistilling = computed(() => {
   return inProgress;
 });
 
-const selectedModelDisplayName = computed(() => {
-  return prettyModelLabels(models.value).get(selectedModel.value) || selectedModel.value;
-});
-
 const selectedModelInfo = computed(() => models.value.find((m) => m.id === selectedModel.value));
 const maxContextTokens = computed(() => selectedModelInfo.value?.max_context_tokens || 200000);
 
@@ -1024,7 +1092,7 @@ const LLM_TYPE_TEXT = 2;
 const LLM_TYPE_TOOL_USE = 5;
 const LLM_TYPE_TOOL_RESULT = 6;
 
-// Short excerpt of an agent message for the token-cost-graph hover readout:
+// Short excerpt of an agent message for the token cost graph hover readout:
 // first text block, or the first tool call when the message is tools-only.
 // Cached by message_id: llm_data can be large and messages with usage data
 // are complete, so their snippet never changes.
@@ -1081,11 +1149,69 @@ function isHumanUserMessage(m: Message): boolean {
   return human;
 }
 
-// Per-LLM-call usage entries (in order) for the token-cost-graph feature
-// flag. Includes every generation: the graph shows cumulative conversation
-// cost, not just the live context window. All-zero records (e.g. error
-// placeholders) are skipped. Empty while the flag is off so the default path
-// doesn't JSON.parse usage for every message on each stream update.
+// Parsed usage_data / other_usage_data, cached by message_id like
+// snippetCache/humanUserCache above. The usage walk below runs on every stream
+// update — `messages` is replaced wholesale — so re-parsing would be
+// O(conversation) JSON.parse per streamed token. All four caches are dropped
+// on conversation switch (see the conversationId watch) so they stay bounded
+// by one conversation's message count rather than the session's.
+//
+// Only messages that ALREADY carry the field are cached: a row is written once,
+// complete, with its usage (there is no UPDATE ... SET usage_data), so a cached
+// parse can't go stale — but caching "field absent" would be a bet on that
+// invariant rather than a consequence of it, and would silently ignore usage
+// that arrived later for the same message_id. Absent is a cheap early return
+// anyway; malformed-but-present is cached so bad JSON is parsed at most once.
+const usageParseCache = new Map<string, Usage | null>();
+function parseUsage(m: Message): Usage | null {
+  if (!m.usage_data) return null;
+  const cached = usageParseCache.get(m.message_id);
+  if (cached !== undefined) return cached;
+  let u: Usage | null = null;
+  try {
+    u = typeof m.usage_data === "string" ? JSON.parse(m.usage_data) : m.usage_data;
+  } catch {
+    /* ignore malformed usage */
+  }
+  usageParseCache.set(m.message_id, u);
+  return u;
+}
+
+// Shared cache-miss result. Readonly so a caller can't mutate every message's
+// "no other usage" answer at once; the cached parses are handed out the same
+// way, since callers only ever read them.
+const NO_OTHER_USAGE: readonly OtherUsageEntry[] = Object.freeze([]);
+const otherUsageParseCache = new Map<string, readonly OtherUsageEntry[]>();
+function parseOtherUsage(m: Message): readonly OtherUsageEntry[] {
+  if (!m.other_usage_data) return NO_OTHER_USAGE;
+  const cached = otherUsageParseCache.get(m.message_id);
+  if (cached !== undefined) return cached;
+  let entries: readonly OtherUsageEntry[] = NO_OTHER_USAGE;
+  try {
+    const parsed = JSON.parse(m.other_usage_data);
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch {
+    /* ignore malformed other usage */
+  }
+  otherUsageParseCache.set(m.message_id, entries);
+  return entries;
+}
+
+// The usage walk below is only consumed by the context usage popup's cost
+// graph, which isn't mounted until the popup is first opened. Until then this
+// stays false and the computed returns empty, so a conversation whose cost the
+// user never asks about pays nothing on the streaming path. ContextUsageBar
+// flips it via onUsageNeeded — on hover/focus as a head start, and on the
+// popover's show event as the guarantee — and it stays flipped for the rest of
+// the conversation: the popup can be reopened, and a stale graph would be worse
+// than the walk. This is what the token-cost-graph feature flag used to gate;
+// it is reset per conversation with the memo caches below.
+const usageWanted = ref(false);
+
+// Per-LLM-call usage entries (in order) for the token cost graph in the
+// context usage popup. Includes every generation: the graph shows cumulative
+// conversation cost, not just the live context window. All-zero records
+// (e.g. error placeholders) are skipped.
 //
 // The same single walk also collects "other" (indirect) LLM usage —
 // compaction summarization, LLM-backed tools, slug generation, … — from any
@@ -1093,7 +1219,8 @@ function isHumanUserMessage(m: Message): boolean {
 // (purpose, model, url) rows. Inclusion semantics are identical to
 // usage_data: forked copies carry both fields and both are counted.
 const usageData = computed<{ entries: UsageEntry[]; otherRows: OtherUsageRow[] }>(() => {
-  if (!tokenCostGraphEnabled.value) return { entries: [], otherRows: [] };
+  if (!usageWanted.value) return { entries: [], otherRows: [] };
+  perfCount("chat.usageEntries");
   const out: UsageEntry[] = [];
   const otherEntries: OtherUsageEntry[] = [];
   // A turn starts at the first call, after a human user message, or after an
@@ -1104,14 +1231,7 @@ const usageData = computed<{ entries: UsageEntry[]; otherRows: OtherUsageRow[] }
   // first call's duration (created_at only marks call completion).
   let turnStartTs = 0;
   for (const m of messages.value) {
-    if (m.other_usage_data) {
-      try {
-        const parsed = JSON.parse(m.other_usage_data);
-        if (Array.isArray(parsed)) otherEntries.push(...parsed);
-      } catch {
-        /* ignore malformed other usage */
-      }
-    }
+    otherEntries.push(...parseOtherUsage(m));
     if (isHumanUserMessage(m)) {
       nextStartsTurn = true;
       turnStartTs = Date.parse(m.created_at) || 0;
@@ -1122,29 +1242,24 @@ const usageData = computed<{ entries: UsageEntry[]; otherRows: OtherUsageRow[] }
     // without (or with malformed) usage data. Read it up front, but apply it
     // after this call so the call itself stays in its own turn.
     const endsTurn = !!m.end_of_turn;
-    if (m.usage_data) {
-      try {
-        const u: Usage = typeof m.usage_data === "string" ? JSON.parse(m.usage_data) : m.usage_data;
-        if (
-          (u.input_tokens || 0) +
-            (u.cache_creation_input_tokens || 0) +
-            (u.cache_read_input_tokens || 0) +
-            (u.output_tokens || 0) >
-          0
-        ) {
-          out.push({
-            ...u,
-            snippet: messageSnippet(m),
-            generation: m.generation,
-            timestamp: Date.parse(m.created_at) || 0,
-            startsTurn: nextStartsTurn,
-            turnStartTimestamp: nextStartsTurn && turnStartTs ? turnStartTs : undefined,
-          });
-          nextStartsTurn = false;
-        }
-      } catch {
-        /* ignore malformed usage */
-      }
+    const u = parseUsage(m);
+    if (
+      u &&
+      (u.input_tokens || 0) +
+        (u.cache_creation_input_tokens || 0) +
+        (u.cache_read_input_tokens || 0) +
+        (u.output_tokens || 0) >
+        0
+    ) {
+      out.push({
+        ...u,
+        snippet: messageSnippet(m),
+        generation: m.generation,
+        timestamp: Date.parse(m.created_at) || 0,
+        startsTurn: nextStartsTurn,
+        turnStartTimestamp: nextStartsTurn && turnStartTs ? turnStartTs : undefined,
+      });
+      nextStartsTurn = false;
     }
     if (endsTurn) {
       nextStartsTurn = true;
@@ -1208,6 +1323,62 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+function formatMessageCount(count: number): string {
+  return messageCountFormatter.format(count);
+}
+
+function loadSourceLabel(source: ConversationLoadSource | undefined): string {
+  switch (source) {
+    case "memory":
+      return "Memory cache";
+    case "indexeddb":
+      return "IndexedDB cache";
+    case "incremental":
+      return "Cache + server tail";
+    case "network":
+      return "Network";
+    default:
+      return "Message cache";
+  }
+}
+
+const loadingTitle = computed(() => {
+  const progress = loadingProgress.value;
+  switch (progress?.phase) {
+    case "cache":
+      return "Checking message cache…";
+    case "parsing":
+      return "Preparing conversation…";
+    case "rendering":
+      return progress.messages !== undefined
+        ? `Rendering ${formatMessageCount(progress.messages)} messages…`
+        : "Rendering conversation…";
+    default:
+      return "Loading conversation…";
+  }
+});
+
+const loadingSubtitle = computed(() => {
+  const progress = loadingProgress.value;
+  const known = progress?.messages ?? lastKnownMessageCount.value;
+  const knownText =
+    known !== null && known !== undefined ? `${formatMessageCount(known)} messages` : "";
+  if (!progress || progress.phase === "cache") {
+    return knownText ? `${knownText} last time · checking IndexedDB` : "Checking IndexedDB";
+  }
+  if (progress.phase === "rendering") {
+    const pieces = [loadSourceLabel(progress.source)];
+    if (knownText) pieces.push(knownText);
+    if (progress.bytesDownloaded > 0) pieces.push(formatBytes(progress.bytesDownloaded));
+    return pieces.join(" · ");
+  }
+  const bytes =
+    progress.bytesTotal && progress.bytesTotal > 0
+      ? `${formatBytes(progress.bytesDownloaded)} of ${formatBytes(progress.bytesTotal)}`
+      : `${formatBytes(progress.bytesDownloaded)} downloaded`;
+  return knownText ? `${bytes} · ~${knownText} last time` : bytes;
+});
 
 // ---- Render model (porting renderMessages into structured data) ----
 const renderModel = computed<GenerationBlock[]>(perfWrap("chat.renderModel", buildRenderModel));
@@ -1352,7 +1523,7 @@ function buildRenderModel(): GenerationBlock[] {
       const isPillable =
         toolPillsEnabled.value &&
         item.type === "tool" &&
-        !isAutoExpandTool(item.toolName, item.toolInput);
+        !isAutoExpandTool(item.toolName, item.toolInput, item.display);
       if (!isPillable || pillBuf.length === 0) {
         const tsNodes = maybeTimestamp(
           itemTime(item),
@@ -1463,6 +1634,9 @@ const showStreamingPreview = computed(() => !!streamingText.value && agentWorkin
 
 // ---- scroll ----
 const MAX_SCROLL_OFFSET = 0x7fffffff;
+function observedBottomScrollTop(listHeight: number, containerHeight: number): number {
+  return Math.max(0, listHeight - containerHeight);
+}
 const BOTTOM_PIN_SCROLL_RELEASE_DELTA = 128;
 // The bottom sentinel's IntersectionObserver rootMargin, which the observer
 // below is built from. An upward scroll larger than this cannot be one of the
@@ -1515,8 +1689,12 @@ function scrollToBottom() {
       stopBottomPin();
       return;
     }
-    el.scrollTop = MAX_SCROLL_OFFSET;
-    lastObservedScrollTop = el.scrollTop;
+    const bottomScrollTop =
+      lastListHeight > 0 && lastContainerHeight > 0
+        ? observedBottomScrollTop(lastListHeight, lastContainerHeight)
+        : null;
+    el.scrollTop = bottomScrollTop ?? MAX_SCROLL_OFFSET;
+    if (bottomScrollTop !== null) lastObservedScrollTop = bottomScrollTop;
     if (!bottomPinActive) return;
     bottomPinFrame = requestAnimationFrame(step);
   };
@@ -1529,8 +1707,10 @@ function syncFromStore(focusedId: string) {
   if (!rec) return;
   perfCount("chat.syncFromStore");
   messages.value = rec.messages;
-  lastKnownMessageCount.value = rec.messages.length;
-  saveMsgCount(rec.messages.length);
+  if (rec.messages.length > 0 || rec.hasFullHistory) {
+    lastKnownMessageCount.value = rec.messages.length;
+    saveMsgCount(rec.messages.length);
+  }
   contextWindowSize.value = rec.contextWindowSize;
   if (props.onConversationUpdate && rec.conversation) {
     props.onConversationUpdate(rec.conversation);
@@ -1546,8 +1726,170 @@ function syncTransientFromStore(focusedId: string) {
   agentWorking.value = tr.agentWorking;
 }
 
+const LARGE_LOAD_STATUS_MESSAGES = 100;
+const LOAD_DETAIL_DELAY_MS = 300;
+const messageCountFormatter = new Intl.NumberFormat();
+
+interface ConversationLoadTiming {
+  startedAt: number;
+  hydrateMs: number;
+  fetchMs: number;
+  renderMs: number;
+}
+
+function clearConversationLoading(): void {
+  loadingFlag = false;
+  loading.value = false;
+  renderingConversation.value = false;
+  if (loadingProgressDelay) {
+    clearTimeout(loadingProgressDelay);
+    loadingProgressDelay = null;
+  }
+  showLoadingProgressUI.value = false;
+  loadingProgress.value = null;
+}
+
+function beginConversationLoading(focusedId: string): void {
+  if (!loading.value) return;
+  loadingFlag = true;
+  renderingConversation.value = false;
+  const knownCount = loadMsgCount();
+  lastKnownMessageCount.value = knownCount;
+  loadingProgress.value = {
+    phase: "cache",
+    bytesDownloaded: 0,
+    messages: knownCount ?? undefined,
+  };
+  showLoadingProgressUI.value = (knownCount ?? 0) >= LARGE_LOAD_STATUS_MESSAGES;
+  if (!showLoadingProgressUI.value) {
+    if (loadingProgressDelay) clearTimeout(loadingProgressDelay);
+    loadingProgressDelay = window.setTimeout(() => {
+      if (focusedId === currentConversationId && loading.value) {
+        showLoadingProgressUI.value = true;
+      }
+    }, LOAD_DETAIL_DELAY_MS);
+  }
+}
+
+/** Keep the already-painted status overlay through Vue's DOM patch and one
+ * browser paint. The timeout only bounds browsers/background tabs that stop
+ * delivering animation frames. */
+function waitForConversationPaint(): Promise<void> {
+  if (document.visibilityState === "hidden") return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 250);
+    requestAnimationFrame(() => requestAnimationFrame(finish));
+  });
+}
+
+type CachedConversationRecord = NonNullable<ReturnType<typeof messageStore.peek>>;
+
+function applyConversationRecord(cached: CachedConversationRecord): void {
+  messages.value = cached.messages;
+  lastKnownMessageCount.value = cached.messages.length;
+  saveMsgCount(cached.messages.length);
+  contextWindowSize.value = cached.contextWindowSize;
+  if (props.onConversationUpdate && cached.conversation) {
+    props.onConversationUpdate(cached.conversation);
+  }
+}
+
+/** Paint usable cached history before a tail/full refresh. The refresh remains
+ * part of the same measured load, but can no longer strand the cache behind an
+ * overlay if the network stalls. */
+async function revealCachedConversation(
+  focusedId: string,
+  loadEpoch: number,
+  source: ConversationLoadSource,
+  timing: ConversationLoadTiming,
+  cached: CachedConversationRecord,
+): Promise<void> {
+  if (!loading.value) return;
+  if (focusedId !== currentConversationId || loadEpoch !== conversationLoadEpoch) return;
+
+  applyConversationRecord(cached);
+  renderingConversation.value = true;
+  if (cached.messages.length >= LARGE_LOAD_STATUS_MESSAGES) {
+    showLoadingProgressUI.value = true;
+  }
+  loadingProgress.value = {
+    phase: "rendering",
+    bytesDownloaded: 0,
+    messages: cached.messages.length,
+    source,
+  };
+
+  const renderStarted = performance.now();
+  await nextTick();
+  await waitForConversationPaint();
+  if (focusedId !== currentConversationId || loadEpoch !== conversationLoadEpoch) return;
+  timing.renderMs += performance.now() - renderStarted;
+  clearConversationLoading();
+}
+
+async function finishConversationLoad(
+  focusedId: string,
+  loadEpoch: number,
+  source: ConversationLoadSource,
+  timing: ConversationLoadTiming,
+  cached: CachedConversationRecord,
+  bytes: number,
+): Promise<void> {
+  if (focusedId !== currentConversationId || loadEpoch !== conversationLoadEpoch) return;
+
+  applyConversationRecord(cached);
+
+  const renderStarted = performance.now();
+  if (loading.value) {
+    renderingConversation.value = true;
+    if (cached.messages.length >= LARGE_LOAD_STATUS_MESSAGES) {
+      showLoadingProgressUI.value = true;
+    }
+    loadingProgress.value = {
+      phase: "rendering",
+      bytesDownloaded: bytes,
+      messages: cached.messages.length,
+      source,
+    };
+  }
+
+  await nextTick();
+  await waitForConversationPaint();
+  if (focusedId !== currentConversationId || loadEpoch !== conversationLoadEpoch) return;
+
+  const renderMs = timing.renderMs + (performance.now() - renderStarted);
+  const totalMs = performance.now() - timing.startedAt;
+  clearConversationLoading();
+  perfRecordConversationLoad({
+    conversationId: focusedId,
+    source,
+    messages: cached.messages.length,
+    bytes,
+    hydrateMs: timing.hydrateMs,
+    fetchMs: timing.fetchMs,
+    renderMs,
+    totalMs,
+  });
+}
+
 async function loadMessages(focusedId: string) {
-  const isCurrent = () => focusedId === currentConversationId;
+  const loadEpoch = ++conversationLoadEpoch;
+  const isCurrent = () =>
+    focusedId === currentConversationId && loadEpoch === conversationLoadEpoch;
+  const timing: ConversationLoadTiming = {
+    startedAt: performance.now(),
+    hydrateMs: 0,
+    fetchMs: 0,
+    renderMs: 0,
+  };
+  beginConversationLoading(focusedId);
 
   // Drafts never have server-side messages; skip the network load entirely so
   // a stalled fetch can't strand the loading spinner. The switch watcher
@@ -1558,43 +1900,37 @@ async function loadMessages(focusedId: string) {
     props.currentConversation?.is_draft &&
     props.currentConversation.conversation_id === focusedId
   ) {
-    loadingFlag = false;
-    loading.value = false;
-    if (loadingProgressDelay) {
-      clearTimeout(loadingProgressDelay);
-      loadingProgressDelay = null;
-    }
-    showLoadingProgressUI.value = false;
-    loadingProgress.value = null;
+    clearConversationLoading();
     return;
   }
 
-  if (!messageStore.isHydrated(focusedId)) {
+  const wasHydrated = messageStore.isHydrated(focusedId);
+  const hadHotMessages = (messageStore.peek(focusedId)?.messages.length ?? 0) > 0;
+  // Hot-memory loads have no asynchronous cache read to give the status a
+  // chance to paint before Vue mounts the large message tree. Yield one paint
+  // explicitly; otherwise status + thousands of rows land in the same flush.
+  if (wasHydrated && loading.value) {
+    await nextTick();
+    await waitForConversationPaint();
+    if (!isCurrent()) return;
+  }
+  if (!wasHydrated) {
+    const hydrateStarted = performance.now();
     await messageStore.hydrate(focusedId);
+    timing.hydrateMs = performance.now() - hydrateStarted;
   }
   if (!isCurrent()) return;
 
   let cached = messageStore.peek(focusedId);
   if (cached) {
-    pendingScroll = loadScroll();
     messages.value = cached.messages;
-    lastKnownMessageCount.value = cached.messages.length;
-    saveMsgCount(cached.messages.length);
+    if (cached.messages.length > 0 || cached.hasFullHistory) {
+      lastKnownMessageCount.value = cached.messages.length;
+      saveMsgCount(cached.messages.length);
+    }
     contextWindowSize.value = cached.contextWindowSize;
     if (props.onConversationUpdate && cached.conversation) {
       props.onConversationUpdate(cached.conversation);
-    }
-    // Only drop the loading state once we actually have messages to show.
-    // A cached record can exist with an empty messages array (e.g. hydrated
-    // from an empty IDB row before the REST backfill lands); flipping loading
-    // off here would render the "Send a message to start the conversation"
-    // empty-state over a conversation that has history. Keep the spinner up
-    // until either messages arrive or the REST load below completes.
-    if (cached.messages.length > 0) {
-      loadingFlag = false;
-      loading.value = false;
-      showLoadingProgressUI.value = false;
-      loadingProgress.value = null;
     }
   }
 
@@ -1604,51 +1940,55 @@ async function loadMessages(focusedId: string) {
     (cached.maxSequenceIdKnown <= 0 || cached.maxSequenceId >= cached.maxSequenceIdKnown);
 
   if (cacheIsComplete && !cached!.needsRefresh) {
-    // We have the full history (even if it's legitimately empty). Clear the
-    // loading state so a genuinely empty conversation shows its empty-state
-    // rather than an indefinite spinner.
     cacheDiag("hit", "load.served_from_cache", {
       conversation_id: focusedId,
       messages: cached!.messages.length,
     });
-    loadingFlag = false;
-    loading.value = false;
-    showLoadingProgressUI.value = false;
-    loadingProgress.value = null;
+    await finishConversationLoad(
+      focusedId,
+      loadEpoch,
+      wasHydrated || hadHotMessages ? "memory" : "indexeddb",
+      timing,
+      cached!,
+      0,
+    );
     return;
+  }
+
+  if (cached && cached.messages.length > 0) {
+    await revealCachedConversation(
+      focusedId,
+      loadEpoch,
+      wasHydrated || hadHotMessages ? "memory" : "indexeddb",
+      timing,
+      cached,
+    );
+    if (!isCurrent()) return;
   }
 
   // Incremental path: the cache holds a complete contiguous history, we just
   // don't know whether the server has grown past it (stream reconnect, or the
   // list's known-max is ahead of us). Ask only for the tail — a few hundred
-  // bytes instead of re-downloading the whole conversation. The messages
-  // already on screen stay on screen while this runs.
+  // bytes instead of re-downloading the whole conversation.
   if (cached && cached.hasFullHistory && cached.messages.length > 0) {
     const fromSeq = cached.maxSequenceId;
+    const fetchStarted = performance.now();
+    let fetchComplete = false;
     try {
       const tail = await api.getConversationSince(focusedId, fromSeq);
+      timing.fetchMs += performance.now() - fetchStarted;
+      fetchComplete = true;
       if (!isCurrent()) return;
       messageStore.applyIncrementalTail(focusedId, tail, fromSeq);
       cached = messageStore.peek(focusedId);
-      pendingScroll = loadScroll();
-      const merged = cached?.messages ?? [];
-      messages.value = merged;
-      lastKnownMessageCount.value = merged.length;
-      saveMsgCount(merged.length);
-      loadingFlag = false;
-      loading.value = false;
-      if (loadingProgressDelay) {
-        clearTimeout(loadingProgressDelay);
-        loadingProgressDelay = null;
-      }
-      showLoadingProgressUI.value = false;
-      loadingProgress.value = null;
+      if (!cached) throw new Error("conversation cache vanished after incremental refresh");
       if (props.onConversationUpdate && tail.conversation) {
         props.onConversationUpdate(tail.conversation);
       }
+      await finishConversationLoad(focusedId, loadEpoch, "incremental", timing, cached, 0);
       return;
     } catch (err) {
-      // Fall through to the full load below; the cached view stays on screen.
+      if (!fetchComplete) timing.fetchMs += performance.now() - fetchStarted;
       cacheDiag(
         "fail",
         "refresh.incremental_failed",
@@ -1674,60 +2014,48 @@ async function loadMessages(focusedId: string) {
   });
 
   try {
-    loadingFlag = true;
-    if (!cached) loading.value = true;
+    loadingFlag = loading.value;
     error.value = null;
-    showLoadingProgressUI.value = false;
-    if (loadingProgressDelay) clearTimeout(loadingProgressDelay);
-    loadingProgressDelay = window.setTimeout(() => {
-      showLoadingProgressUI.value = true;
-    }, 500);
-    if (!cached) lastKnownMessageCount.value = loadMsgCount();
-    loadingProgress.value = { phase: "downloading", bytesDownloaded: 0 };
+    let downloadedBytes = 0;
+    if (loading.value) {
+      loadingProgress.value = {
+        phase: "downloading",
+        bytesDownloaded: 0,
+        messages: lastKnownMessageCount.value ?? undefined,
+        source: "network",
+      };
+    }
 
-    let response = await api.getConversationWithProgress(focusedId, (progress) => {
-      loadingProgress.value = progress;
+    const fetchStarted = performance.now();
+    const response = await api.getConversationWithProgress(focusedId, (progress) => {
+      downloadedBytes = progress.bytesDownloaded;
+      if (!isCurrent() || !loading.value) return;
+      loadingProgress.value = {
+        ...progress,
+        messages: lastKnownMessageCount.value ?? undefined,
+        source: "network",
+      };
     });
+    timing.fetchMs += performance.now() - fetchStarted;
     if (!isCurrent()) return;
 
     // applyFullHistory is non-regressing: a REST snapshot can be STALE relative
-    // to the live /api/stream2 feed (the agent reply to a just-created
-    // conversation can land between issuing the GET and its response
-    // resolving), so the store merges in any newer streamed messages rather
-    // than replacing wholesale. Render from the STORE (post-merge), not the
-    // raw response, so a stale snapshot never regresses live state.
+    // to the live /api/stream2 feed, so render from the store after its merge.
     messageStore.applyFullHistory(focusedId, response);
     cached = messageStore.peek(focusedId);
-
-    pendingScroll = loadScroll();
-    const loadedMessages = cached?.messages ?? response.messages ?? [];
-    messages.value = loadedMessages;
-    lastKnownMessageCount.value = loadedMessages.length;
-    saveMsgCount(loadedMessages.length);
-    loadingFlag = false;
-    loading.value = false;
-    if (loadingProgressDelay) {
-      clearTimeout(loadingProgressDelay);
-      loadingProgressDelay = null;
+    if (!cached) throw new Error("conversation cache missing after full load");
+    if (response.context_window_size !== undefined) {
+      contextWindowSize.value = response.context_window_size;
     }
-    showLoadingProgressUI.value = false;
-    loadingProgress.value = null;
-    contextWindowSize.value = response.context_window_size ?? 0;
     if (props.onConversationUpdate && response.conversation) {
       props.onConversationUpdate(response.conversation);
     }
+    await finishConversationLoad(focusedId, loadEpoch, "network", timing, cached, downloadedBytes);
   } catch (err) {
     if (!isCurrent()) return;
     console.error("Failed to load messages:", err);
     error.value = "Failed to load messages";
-    loadingFlag = false;
-    loading.value = false;
-    if (loadingProgressDelay) {
-      clearTimeout(loadingProgressDelay);
-      loadingProgressDelay = null;
-    }
-    showLoadingProgressUI.value = false;
-    loadingProgress.value = null;
+    clearConversationLoading();
   }
 }
 
@@ -2105,11 +2433,43 @@ function handleInsertFromTerminal(text: string) {
 function openExternalLink(url: string) {
   window.open(url, "_blank");
 }
-function openTerminalUrl() {
-  const cwd = props.currentConversation?.cwd || selectedCwd.value || "";
-  if (!terminalURL) return;
-  const url = terminalURL.replace("WORKING_DIR", encodeURIComponent(cwd));
-  window.open(url, "_blank");
+// Open an in-app interactive shell terminal, mirroring the command palette's
+// "Open Terminal" action (and the openTerminalTrigger watch below). Used by the
+// overflow menu's Terminal item and its keyboard shortcut.
+function openInAppTerminal() {
+  const cwd =
+    props.currentConversation?.cwd ||
+    selectedCwd.value ||
+    window.__SHELLEY_INIT__?.default_cwd ||
+    "/";
+  const terminal: EphemeralTerminal = {
+    id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    command: 'exec "${SHELL:-bash}" -i',
+    cwd,
+    createdAt: new Date(),
+  };
+  props.setEphemeralTerminals((prev) => [...prev, terminal]);
+  terminalAutoFocusId.value = terminal.id;
+  setTimeout(() => scrollToBottom(), 100);
+}
+// Focus an already-open terminal if there is one, otherwise open a new one.
+// Used by the Ctrl+` shortcut: a repeat press should bring you back to the
+// existing shell rather than spawning another. Setting terminalAutoFocusId lets
+// TerminalPanel un-minimize, activate that tab, and focus its xterm.
+function focusOrOpenTerminal() {
+  const existing = props.ephemeralTerminals;
+  if (existing.length > 0) {
+    // Reset to null first so re-focusing the terminal that's already in
+    // autoFocusId still fires TerminalPanel's watcher (it watches the value,
+    // not a trigger). nextTick re-assigns the id to run the focus effect.
+    terminalAutoFocusId.value = null;
+    const id = existing[existing.length - 1].id;
+    nextTick(() => {
+      terminalAutoFocusId.value = id;
+    });
+    return;
+  }
+  openInAppTerminal();
 }
 function openExport() {
   window.open(`/export/${props.conversationId}`, "_blank", "noopener");
@@ -2121,6 +2481,60 @@ async function archiveFromMenu() {
   } catch (err) {
     console.error("Failed to archive conversation:", err);
   }
+}
+
+// Keyboard shortcuts for the overflow-menu actions this component owns. Each
+// case invokes the same handler as the corresponding menu click (Terminal is
+// the one deliberate exception: the shortcut re-focuses an existing terminal
+// rather than always opening a new one), and is gated by the same availability
+// the menu uses (see the ChatOverflowMenu props bound in the template) so a
+// shortcut never fires for a hidden item. The palette (Cmd/Ctrl+K) and file
+// finder (Cmd/Ctrl+Shift+P) are handled in App.vue, which owns those modals.
+// See utils/menuShortcuts.ts for the combos.
+function handleMenuShortcut(e: KeyboardEvent) {
+  // Don't hijack keystrokes while typing in a field.
+  const target = e.target as HTMLElement | null;
+  if (
+    target &&
+    (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+  ) {
+    return;
+  }
+  const action = matchChatInterfaceAction(e);
+  if (!action) return;
+  switch (action) {
+    case "diffs":
+      if (!hasCwd.value) return;
+      showDiffViewer.value = true;
+      break;
+    case "gitGraph":
+      if (!hasCwd.value) return;
+      showGitGraph.value = true;
+      break;
+    case "terminal":
+      focusOrOpenTerminal();
+      break;
+    case "archive":
+      if (
+        !props.conversationId ||
+        !props.onArchiveConversation ||
+        props.currentConversation?.archived
+      )
+        return;
+      void archiveFromMenu();
+      break;
+    case "export":
+      if (!props.conversationId || messages.value.length === 0) return;
+      openExport();
+      break;
+    case "editAgentsMd":
+      showAgentsMdEditor.value = true;
+      break;
+    case "checkVersion":
+      openVersionModal();
+      break;
+  }
+  e.preventDefault();
 }
 
 function onNewConversationClick(e: MouseEvent) {
@@ -2322,15 +2736,20 @@ function onDiffViewerClose() {
 
 // Loading bar fill class/style mirror the React conditional.
 const loadingBarFillClass = computed(() => {
+  const phase = loadingProgress.value?.phase;
+  if (phase === "parsing" || phase === "rendering") {
+    return "conversation-loading-bar-fill parsing";
+  }
   const lp = loadingProgress.value;
-  if (lp?.phase === "parsing") return "conversation-loading-bar-fill parsing";
-  if (!lp?.bytesTotal || lp.bytesTotal <= 0) return "conversation-loading-bar-fill indeterminate";
+  if (phase === "cache" || !lp?.bytesTotal || lp.bytesTotal <= 0) {
+    return "conversation-loading-bar-fill indeterminate";
+  }
   return "conversation-loading-bar-fill";
 });
 const loadingBarFillStyle = computed<Record<string, string> | undefined>(() => {
   const lp = loadingProgress.value;
-  if (lp?.phase === "parsing") return undefined;
-  if (lp?.bytesTotal && lp.bytesTotal > 0) {
+  if (!lp || lp.phase !== "downloading") return undefined;
+  if (lp.bytesTotal && lp.bytesTotal > 0) {
     return { width: `${Math.min(100, (lp.bytesDownloaded / lp.bytesTotal) * 100)}%` };
   }
   return undefined;
@@ -2352,7 +2771,6 @@ const statusContentProps = computed(() => {
     maxContextTokens: maxContextTokens.value,
     usageEntries: usageEntries.value,
     otherUsageRows: otherUsageRows.value,
-    selectedModelDisplayName: selectedModelDisplayName.value,
     hostname,
     models: models.value,
     selectedModel: selectedModel.value,
@@ -2369,12 +2787,19 @@ const statusContentProps = computed(() => {
     onDistillNewGeneration: contextBarDistill.value,
     onStartNewGeneration: handleStartNewGeneration,
     onSelectModel: setSelectedModel,
+    // The status readout's inline picker only renders for a conversation that
+    // already exists, where the model and reasoning level are server state (see
+    // sendModelCommand); the composer's picker only renders before the first
+    // send, where they are not. Separate handlers, not shared ones.
+    onSwitchConversationModel: switchConversationModel,
+    onSwitchConversationThinkingLevel: switchConversationThinkingLevel,
     onManageModels: () => props.onOpenModelsModal?.(),
     onRefreshModels: handleRefreshModels,
     onThinkingChange: setThinkingLevel,
     onSetToolOverride: setToolOverride,
     onResetToolOverrides: resetToolOverrides,
     onOpenDirectoryPicker: () => (showDirectoryPicker.value = true),
+    onUsageNeeded: () => (usageWanted.value = true),
   };
 });
 
@@ -2396,6 +2821,23 @@ watch(
     }
     applyModel(props.currentConversation.model);
   },
+);
+
+// Sync the reasoning level from the conversation, the counterpart of the model
+// watch above. /model can change the level mid-conversation (from the status
+// readout's picker or a typed command), and the conversation's stored options
+// are then the truth — without this the pills would keep showing the level the
+// composer last chose locally, i.e. the switch the user just made wouldn't
+// appear. Only follows a conversation that actually recorded a level: a null
+// means "never set", which must not clobber the local default.
+watch(
+  () => [props.currentConversation?.conversation_id, conversationThinkingLevel.value] as const,
+  ([, level]) => {
+    if (!level || level === thinkingLevel.value) return;
+    if (!THINKING_LEVELS.some((l) => l.value === level)) return;
+    setThinkingLevel(level as ThinkingLevel);
+  },
+  { immediate: true },
 );
 
 // Reset cwdInitialized when switching to new conversation.
@@ -2651,7 +3093,12 @@ watch(
   (id) => {
     currentConversationId = id;
     activeModelHealth = null;
+    pendingScroll = id ? loadScroll() : undefined;
     teardownSubscriptions();
+    // An annotation view belongs to the image it was opened from; switching
+    // conversations leaves it stranded.
+    closeImageComment();
+    clearConversationLoading();
     lastReviewedSeq.value = loadReviewedSeq(id);
     showResumeUnread.value = false;
     // Reset scroll bookkeeping so state from the previous conversation can't
@@ -2668,6 +3115,14 @@ watch(
     inferredScrollUpAt = -Infinity;
     inferredScrollUpDelta = 0;
     atBottom = true;
+    // Per-message memo caches are keyed by message_id, which is globally
+    // unique, so stale entries are never *wrong* — they'd just accumulate for
+    // every conversation visited in the session. Drop them on the switch.
+    snippetCache.clear();
+    humanUserCache.clear();
+    usageParseCache.clear();
+    otherUsageParseCache.clear();
+    usageWanted.value = false;
     if (!id) {
       messages.value = [];
       contextWindowSize.value = 0;
@@ -2724,7 +3179,11 @@ watch(
     // loadMessages resolves, so the empty-state only appears for genuinely
     // empty conversations.
     const inMemory = messageStore.peek(focusedId);
-    if (inMemory && inMemory.messages.length > 0) {
+    if (
+      inMemory &&
+      inMemory.messages.length > 0 &&
+      inMemory.messages.length < LARGE_LOAD_STATUS_MESSAGES
+    ) {
       loading.value = false;
     } else {
       loading.value = true;
@@ -2822,25 +3281,11 @@ watch(
   },
 );
 // Trigger: open terminal.
-let terminalCwd = "/";
 watch(
   () => props.openTerminalTrigger,
   (trigger) => {
-    terminalCwd =
-      props.currentConversation?.cwd ||
-      selectedCwd.value ||
-      window.__SHELLEY_INIT__?.default_cwd ||
-      "/";
     if (!trigger || trigger <= 0) return;
-    const terminal: EphemeralTerminal = {
-      id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      command: 'exec "${SHELL:-bash}" -i',
-      cwd: terminalCwd,
-      createdAt: new Date(),
-    };
-    props.setEphemeralTerminals((prev) => [...prev, terminal]);
-    terminalAutoFocusId.value = terminal.id;
-    setTimeout(() => scrollToBottom(), 100);
+    openInAppTerminal();
   },
 );
 
@@ -3099,9 +3544,16 @@ function setupScrollObservers() {
     // detection lives solely in handleScroll (with clamp discounting); inferring
     // it from resize events is what misfired on layout clamps.
     if (!userScrolled && !catchingUp) {
-      container.scrollTop = MAX_SCROLL_OFFSET;
+      // Avoid reading scrollTop after this write. In WebKit that read resolves
+      // the clamped offset by synchronously laying out content-visibility
+      // chunks. The observer already gives us both dimensions for free, and
+      // container padding cancels out of scrollHeight - clientHeight.
+      const bottomScrollTop = observedBottomScrollTop(listHeight, containerHeight);
+      container.scrollTop = bottomScrollTop;
+      if (listHeight > 0 && containerHeight > 0) lastObservedScrollTop = bottomScrollTop;
+    } else {
+      lastObservedScrollTop = container.scrollTop;
     }
-    lastObservedScrollTop = container.scrollTop;
   });
   // (Re)attach the element observers whenever the list/sentinel nodes change.
   // The v-if="loading" spinner tears down and recreates .messages-list on every
@@ -3284,6 +3736,7 @@ onMounted(() => {
   window.addEventListener("beforeunload", saveScrollNow);
   document.addEventListener("visibilitychange", handleVisibilityChange);
   document.addEventListener("keydown", handleScrollKeyDown);
+  document.addEventListener("keydown", handleMenuShortcut);
 });
 
 onUnmounted(() => {
@@ -3300,9 +3753,12 @@ onUnmounted(() => {
   window.removeEventListener("beforeunload", saveScrollNow);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   document.removeEventListener("keydown", handleScrollKeyDown);
+  document.removeEventListener("keydown", handleMenuShortcut);
   document.removeEventListener("mousedown", onAdvancedSettingsOutside);
   mobileMq.removeEventListener("change", onMobileChange);
   if (loadingProgressDelay) clearTimeout(loadingProgressDelay);
   if (highlightTimeout) clearTimeout(highlightTimeout);
+  // Module state: an image left open would reappear over the next conversation.
+  closeImageComment();
 });
 </script>

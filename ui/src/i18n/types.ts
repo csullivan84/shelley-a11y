@@ -136,6 +136,7 @@ export interface TranslationKeys {
   manageModelsAction: string;
   effortLabel: string;
   effortAuto: string;
+  modelSwitchBusy: string;
   customModelsGroup: string;
   editModel: string;
   loadingModels: string;
@@ -247,6 +248,8 @@ export interface TranslationKeys {
   // AGENTS.md editor
   editUserAgentsMd: string;
   editFile: string;
+  editFileShortcut: string;
+  editFileShortcutFirefox: string;
 
   // Sidebar buttons
   openConversations: string;

@@ -37,6 +37,7 @@
       ref="messageRef"
       :class="`${messageClasses} msg-container-relative`"
       data-testid="message"
+      :data-message-id="message.message_id"
       role="alert"
       aria-label="Error message"
       @click="handleMessageClick"
@@ -77,6 +78,7 @@
       ref="messageRef"
       :class="`${messageClasses} msg-container-relative`"
       data-testid="message"
+      :data-message-id="message.message_id"
       role="article"
       aria-label="Tool message"
       @click="handleMessageClick"
@@ -179,6 +181,8 @@
               :citations="item.citations"
               :render-markdown="shouldRenderMarkdown(markdownMode, isUser, isDistilledUser)"
               :message-id="message.message_id"
+              :cache-owner="message"
+              :run-key="String(index)"
             />
             <MessageContentBlock
               v-else
@@ -555,6 +559,9 @@ function handleMessageClick(e: MouseEvent) {
   if (
     target.closest("a") ||
     target.closest("button") ||
+    // A markdown image is a bare <img> that opens the annotation view on click
+    // (MarkdownContent.vue); toggling the action bar underneath it is noise.
+    target.matches('img[role="button"]') ||
     target.closest("[data-action-bar]") ||
     target.closest(".bash-tool-header") ||
     target.closest(".patch-tool-header") ||

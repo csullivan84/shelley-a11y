@@ -25,6 +25,22 @@ const (
 	inlineImagePNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAS0lEQVR42u3OMQ0AIAwAsMlBxEQgBznImQiUcGFiH00qoHEyW+Q+LUJISEhISEhISEhISOiz0K3RYtZqISQkJCQkJCQkJCQk9FnoAQiSrlPnJLTeAAAAAElFTkSuQmCC"
 )
 
+// Constants for the "screenshot image" demo pattern, the same idea one
+// directory over: the file is written where the real screenshot tool writes and
+// referenced by absolute path, which is outside every conversation's working
+// directory -- the case that used to be refused, so it is the one worth holding
+// down in the browser.
+//
+// The directory is spelled out rather than taken from claudetool/browse: this
+// package is reachable from the root module (cmd/e3e -> loop), whose go.sum
+// does not carry browse's chromedp dependencies, so importing it there breaks
+// the build for a test fixture's benefit.
+const (
+	screenshotImageDir      = "/tmp/shelley-screenshots"
+	screenshotImagePath     = screenshotImageDir + "/shelley-screenshot-demo.png"
+	screenshotImageSentinel = "SHELLEY_SCREENSHOT_IMAGE_DEMO"
+)
+
 // requestMentions reports whether any message in the request contains the given
 // substring (across text and tool-result content).
 func requestMentions(req *llm.Request, needle string) bool {
@@ -150,6 +166,12 @@ func (s *PredictableService) Do(ctx context.Context, req *llm.Request) (*llm.Res
 		if requestMentions(req, inlineImageSentinel) {
 			return s.makeResponse(
 				"Here is the generated image:\n\n![demo image]("+inlineImagePath+")\n\nGenerated locally and served from the conversation working directory.",
+				inputTokens,
+			), nil
+		}
+		if requestMentions(req, screenshotImageSentinel) {
+			return s.makeResponse(
+				"Verified against the real product:\n\n![demo screenshot]("+screenshotImagePath+")\n\nServed from the screenshot directory, outside the working directory.",
 				inputTokens,
 			), nil
 		}
@@ -279,8 +301,23 @@ func (s *PredictableService) Do(ctx context.Context, req *llm.Request) (*llm.Res
 			return s.makeBashToolResponse(cmd, inputTokens), nil
 		}
 
+		if inputText == "screenshot image" {
+			// Same as "inline image", but written where the screenshot tool
+			// writes and referenced absolutely, so the follow-up turn exercises
+			// serving a file from outside the conversation's directory.
+			cmd := fmt.Sprintf(
+				"mkdir -p %s && printf %%s %q | base64 -d > %s && echo %s",
+				screenshotImageDir, inlineImagePNGBase64, screenshotImagePath, screenshotImageSentinel,
+			)
+			return s.makeBashToolResponse(cmd, inputTokens), nil
+		}
+
 		if path, ok := strings.CutPrefix(inputText, "change_dir: "); ok {
 			return s.makeChangeDirToolResponse(path, inputTokens), nil
+		}
+
+		if path, ok := strings.CutPrefix(inputText, "read_image: "); ok {
+			return s.makeReadImageToolResponse(strings.TrimSpace(path), inputTokens), nil
 		}
 
 		if delayStr, ok := strings.CutPrefix(inputText, "delay: "); ok {
@@ -682,7 +719,9 @@ func (s *PredictableService) countRequestTokens(req *llm.Request) uint64 {
 
 // makeScreenshotToolResponse creates a response that calls the screenshot tool
 func (s *PredictableService) makeScreenshotToolResponse(selector string, inputTokens uint64) *llm.Response {
-	toolInputData := map[string]any{}
+	// The browser tool dispatches on "action"; without it the call fails with
+	// `unknown action: ""`.
+	toolInputData := map[string]any{"action": "screenshot"}
 	if selector != "" {
 		toolInputData["selector"] = selector
 	}
@@ -712,6 +751,37 @@ func (s *PredictableService) makeScreenshotToolResponse(selector string, inputTo
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
 			CostUSD:      0.0,
+		},
+	}
+}
+
+// makeReadImageToolResponse creates a response that calls the read_image tool
+func (s *PredictableService) makeReadImageToolResponse(path string, inputTokens uint64) *llm.Response {
+	toolInputBytes, _ := json.Marshal(map[string]string{"path": path})
+	responseText := fmt.Sprintf("Reading %s...", path)
+	outputTokens := uint64(len(responseText)/4 + len(toolInputBytes)/4)
+	if outputTokens == 0 {
+		outputTokens = 1
+	}
+	return &llm.Response{
+		ID:    fmt.Sprintf("pred-read_image-%d", time.Now().UnixNano()),
+		Type:  "message",
+		Role:  llm.MessageRoleAssistant,
+		Model: "predictable-v1",
+		Content: []llm.Content{
+			{Type: llm.ContentTypeText, Text: responseText},
+			{
+				ID:        fmt.Sprintf("tool_%d", time.Now().UnixNano()%1000),
+				Type:      llm.ContentTypeToolUse,
+				ToolName:  "read_image",
+				ToolInput: json.RawMessage(toolInputBytes),
+			},
+		},
+		StopReason: llm.StopReasonToolUse,
+		Usage: llm.Usage{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			CostUSD:      0.001,
 		},
 	}
 }

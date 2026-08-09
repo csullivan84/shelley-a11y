@@ -137,6 +137,7 @@ export const es: TranslationKeys = {
   manageModelsAction: "Administrar modelos…",
   effortLabel: "Esfuerzo de razonamiento",
   effortAuto: "auto",
+  modelSwitchBusy: "Termina o detén el turno actual para cambiar de modelo",
   customModelsGroup: "Modelos personalizados",
   editModel: "Editar modelo",
   loadingModels: "Cargando modelos...",
@@ -257,6 +258,9 @@ export const es: TranslationKeys = {
   editUserAgentsMd: "Editar AGENTS.md de usuario",
   editFile: "Editar archivo…",
 
+  editFileShortcut: "Abrir el buscador de archivos",
+  editFileShortcutFirefox:
+    "Firefox reserva este atajo para una ventana privada; usa la paleta de comandos (Cmd/Ctrl+K)",
   openConversations: "Abrir conversaciones",
   expandSidebar: "Expandir barra lateral",
 

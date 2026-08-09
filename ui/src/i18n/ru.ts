@@ -136,6 +136,7 @@ export const ru: TranslationKeys = {
   manageModelsAction: "Управление моделями…",
   effortLabel: "Усилие рассуждения",
   effortAuto: "авто",
+  modelSwitchBusy: "Завершите или остановите текущий ход, чтобы сменить модель",
   customModelsGroup: "Пользовательские модели",
   editModel: "Редактировать модель",
   loadingModels: "Загрузка моделей...",
@@ -256,6 +257,9 @@ export const ru: TranslationKeys = {
   editUserAgentsMd: "Редактировать AGENTS.md",
   editFile: "Редактировать файл…",
 
+  editFileShortcut: "Открыть поиск файлов",
+  editFileShortcutFirefox:
+    "Firefox резервирует это сочетание для приватного окна — используйте палитру команд (Cmd/Ctrl+K)",
   openConversations: "Открыть диалоги",
   expandSidebar: "Развернуть боковую панель",
 
