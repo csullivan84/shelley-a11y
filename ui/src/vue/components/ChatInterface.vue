@@ -233,10 +233,6 @@
       </div>
       </div>
 
-      </div>
-        </div>
-      </div>
-
       <div v-if="loading" class="conversation-loading-overlay">
         <div v-if="showLoadingProgressUI" class="conversation-loading">
           <div class="spinner" />
