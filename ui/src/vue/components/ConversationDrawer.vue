@@ -27,7 +27,8 @@
          (e: "new-conversation"): void              // onNewConversation
          (e: "archived", id: string, next?: Conversation | null): void  // onConversationArchived
          (e: "unarchived", c: Conversation): void   // onConversationUnarchived
-         (e: "renamed", c: Conversation): void      // onConversationRenamed -->
+         (e: "renamed", c: Conversation): void      // onConversationRenamed
+         (e: "open-herds"): void -->
 <template>
   <div
     ref="drawerRef"
@@ -43,6 +44,15 @@
       <h2 class="app-bar-title drawer-title">
         {{ showArchived ? t("archived") : t("conversations") }}
       </h2>
+      <a
+        v-if="!showArchived && !isCollapsed"
+        class="herds-nav-link"
+        href="/herds"
+        aria-label="Herds"
+        @click.prevent="emit('open-herds')"
+      >
+        Herds
+      </a>
       <div class="drawer-header-actions">
         <!-- Search toggle button -->
         <Button
@@ -360,6 +370,7 @@ const emit = defineEmits<{
   (e: "archived", id: string, next?: Conversation | null): void;
   (e: "unarchived", c: Conversation): void;
   (e: "renamed", c: Conversation): void;
+  (e: "open-herds"): void;
 }>();
 
 const drawerRef = ref<HTMLElement | null>(null);

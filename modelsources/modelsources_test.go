@@ -99,6 +99,10 @@ func TestOpenAICodexBuildsLuna(t *testing.T) {
 	if got := responses.Headers.Get("ChatGPT-Account-ID"); got != "account" {
 		t.Errorf("account header = %q", got)
 	}
+	// Must be .../codex, not .../codex/v1 — the backend-api path has no /v1.
+	if responses.ModelURL != "https://chatgpt.com/backend-api/codex" {
+		t.Errorf("ModelURL = %q, want https://chatgpt.com/backend-api/codex", responses.ModelURL)
+	}
 }
 
 func TestGatewaySourceLabels(t *testing.T) {

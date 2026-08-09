@@ -507,6 +507,22 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/terminals/{id}", s.handleTerminalDelete)
 	mux.HandleFunc("POST /api/terminals/{id}/kill", s.handleTerminalDelete)
 
+	// Herds: packs of terminal members (control room over dtach sessions).
+	mux.HandleFunc("GET /api/herds", s.handleListHerds)
+	mux.HandleFunc("POST /api/herds", s.handleCreateHerd)
+	mux.HandleFunc("GET /api/herds/{herd_id}", s.handleGetHerd)
+	mux.HandleFunc("PATCH /api/herds/{herd_id}", s.handlePatchHerd)
+	mux.HandleFunc("POST /api/herds/{herd_id}/members", s.handleAddMemberRoute)
+	mux.HandleFunc("PATCH /api/herds/{herd_id}/members/{member_id}", s.handlePatchMemberRoute)
+	mux.HandleFunc("DELETE /api/herds/{herd_id}/members/{member_id}", s.handleDeleteMemberRoute)
+	mux.HandleFunc("POST /api/herds/{herd_id}/members/{member_id}/detach", s.handleMemberDetach)
+	mux.HandleFunc("POST /api/herds/{herd_id}/members/{member_id}/open", s.handleMemberOpen)
+	mux.HandleFunc("POST /api/herds/{herd_id}/members/{member_id}/close", s.handleMemberClose)
+	mux.HandleFunc("POST /api/herds/{herd_id}/open", s.handleHerdOpenAll)
+	mux.HandleFunc("POST /api/herds/{herd_id}/close", s.handleHerdCloseAll)
+	mux.HandleFunc("GET /api/herds/{herd_id}/close-preview", s.handleHerdClosePreview)
+	mux.HandleFunc("GET /api/terminals/loose", s.handleLooseTerminals)
+
 	// Custom models API
 	mux.Handle("/api/custom-models", http.HandlerFunc(s.handleCustomModels))
 	mux.Handle("/api/custom-models/", http.HandlerFunc(s.handleCustomModel))

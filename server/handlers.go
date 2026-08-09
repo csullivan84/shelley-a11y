@@ -458,7 +458,10 @@ func isConversationSlugPath(path string) bool {
 }
 
 func isSPARoute(path string) bool {
-	return path == "/new" || strings.HasPrefix(path, "/export/")
+	return path == "/new" ||
+		strings.HasPrefix(path, "/export/") ||
+		path == "/herds" ||
+		strings.HasPrefix(path, "/herds/")
 }
 
 // acceptsGzip reports whether r accepts gzip encoding.

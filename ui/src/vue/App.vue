@@ -46,10 +46,20 @@
         @archived="handleConversationArchived"
         @unarchived="handleConversationUnarchived"
         @renamed="handleConversationRenamed"
+        @open-herds="navigateHerd(null)"
       />
 
       <div class="main-content">
+        <HerdsPage
+          v-if="herdsRouteActive"
+          :herd-id="herdsRouteId"
+          @back="leaveHerds"
+          @navigate-herd="navigateHerd"
+          @open-conversation="openConversationFromHerd"
+          @focus-terminal="focusTerminalFromHerd"
+        />
         <ChatInterface
+          v-else
           :conversation-id="currentConversationId"
           :stream-status="streamStatus"
           :reconnect-nonce="reconnectNonce"
@@ -128,6 +138,12 @@
         @open-terminal="
           () => {
             terminalTrigger++;
+            commandPaletteOpen = false;
+          }
+        "
+        @open-herds="
+          () => {
+            navigateHerd(null);
             commandPaletteOpen = false;
           }
         "
@@ -218,6 +234,7 @@ import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue";
 import ChatInterface from "./components/ChatInterface.vue";
 import ConversationDrawer from "./components/ConversationDrawer.vue";
 import CommandPalette from "./components/CommandPalette.vue";
+import HerdsPage from "./components/HerdsPage.vue";
 import ModelsModal from "./components/ModelsModal.vue";
 import NotificationsModal from "./components/NotificationsModal.vue";
 import FeatureFlagsModal from "./components/FeatureFlagsModal.vue";
@@ -269,6 +286,18 @@ function getSlugFromPath(): string | null {
 function isNewPath(): boolean {
   return window.location.pathname === "/new";
 }
+function isHerdsPath(): boolean {
+  return window.location.pathname === "/herds" || window.location.pathname.startsWith("/herds/");
+}
+function getHerdIdFromPath(): string | null {
+  const path = window.location.pathname;
+  if (path === "/herds") return null;
+  if (path.startsWith("/herds/")) {
+    const id = path.slice("/herds/".length).split("/")[0];
+    return id || null;
+  }
+  return null;
+}
 
 // A brand-new-conversation draft composed offline never reaches the server
 // (createDraft fails), so it survives only in localStorage under the "new"
@@ -282,6 +311,52 @@ function hasPendingNewDraft(): boolean {
 // Captured BEFORE render so URL-updating effects don't clobber it.
 const initialSlugFromUrl = getSlugFromPath();
 const initialIsNew = isNewPath() || (!getSlugFromPath() && hasPendingNewDraft());
+const herdsRouteActive = ref(isHerdsPath());
+const herdsRouteId = ref<string | null>(getHerdIdFromPath());
+
+function navigateHerd(id: string | null) {
+  herdsRouteActive.value = true;
+  herdsRouteId.value = id;
+  if (id) window.history.pushState({}, "", `/herds/${id}`);
+  else window.history.pushState({}, "", "/herds");
+  document.title = id ? `Herd - Shelley Agent` : "Herds - Shelley Agent";
+}
+
+function leaveHerds() {
+  herdsRouteActive.value = false;
+  herdsRouteId.value = null;
+  window.history.pushState({}, "", "/");
+  updatePageTitle(currentConversation.value);
+}
+
+function openConversationFromHerd(conversationId: string) {
+  herdsRouteActive.value = false;
+  herdsRouteId.value = null;
+  const found = conversations.value.find((c) => c.conversation_id === conversationId);
+  if (found) {
+    selectConversation(found);
+  } else {
+    currentConversationId.value = conversationId;
+    window.history.pushState({}, "", `/c/${conversationId}`);
+  }
+}
+
+function focusTerminalFromHerd(term: { termId: string; command: string; cwd: string }) {
+  // Ensure the terminal is present in the global dock so it stays available after leaving herds.
+  setEphemeralTerminals((prev) => {
+    if (prev.some((t) => t.termId === term.termId)) return prev;
+    return [
+      ...prev,
+      {
+        id: `herd-${term.termId}`,
+        command: term.command,
+        cwd: term.cwd,
+        createdAt: new Date(),
+        termId: term.termId,
+      },
+    ];
+  });
+}
 
 function updateUrlWithSlug(conversation: Conversation | undefined) {
   const currentSlug = getSlugFromPath();
@@ -591,6 +666,8 @@ function setConversationCwd(cwd: string) {
 }
 
 function selectConversation(conversation: Conversation) {
+  herdsRouteActive.value = false;
+  herdsRouteId.value = null;
   currentConversationId.value = conversation.conversation_id;
   viewedConversation.value = conversation;
   drawerOpen.value = false;
@@ -797,6 +874,13 @@ function handleKeyDown(e: KeyboardEvent) {
 
 // ---- popstate (back/forward + SubagentTool navigation) ----
 async function handlePopState() {
+  if (isHerdsPath()) {
+    herdsRouteActive.value = true;
+    herdsRouteId.value = getHerdIdFromPath();
+    return;
+  }
+  herdsRouteActive.value = false;
+  herdsRouteId.value = null;
   if (isNewPath()) {
     currentConversationId.value = null;
     viewedConversation.value = null;
@@ -825,8 +909,9 @@ async function handlePopState() {
 
 // ---- page title + URL sync ----
 watch(
-  [currentConversationId, viewedConversation, conversations],
+  [currentConversationId, viewedConversation, conversations, herdsRouteActive],
   () => {
+    if (herdsRouteActive.value) return;
     const currentConv =
       viewedConversation.value?.conversation_id === currentConversationId.value
         ? viewedConversation.value

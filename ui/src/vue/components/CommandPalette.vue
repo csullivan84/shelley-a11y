@@ -25,6 +25,7 @@
          (e: "open-models-modal"): void                       // onOpenModelsModal
          (e: "open-notifications-modal"): void                // onOpenNotificationsModal
          (e: "open-feature-flags-modal"): void                // onOpenFeatureFlagsModal
+         (e: "open-herds"): void                              // onOpenHerds
          (e: "next-conversation"): void                       // onNextConversation
          (e: "previous-conversation"): void                   // onPreviousConversation
          (e: "next-user-message"): void                       // onNextUserMessage
@@ -172,6 +173,7 @@ const emit = defineEmits<{
   (e: "open-diff-viewer"): void;
   (e: "open-git-graph"): void;
   (e: "open-terminal"): void;
+  (e: "open-herds"): void;
   (e: "open-file-finder"): void;
   (e: "open-models-modal"): void;
   (e: "open-notifications-modal"): void;
@@ -405,6 +407,20 @@ const actionItems = computed<CommandItem[]>(() => {
       keywords: ["git", "graph", "log", "commits", "history", "branch", "tree"],
     });
   }
+
+  items.push({
+    id: "open-herds",
+    type: "action",
+    title: "Herds",
+    subtitle: "Manage packs of terminals",
+    icon: ICON_CHAT,
+    priority: 12,
+    keywords: ["herd", "herds", "terminals", "pack", "multiplex"],
+    action: () => {
+      emit("open-herds");
+      emit("close");
+    },
+  });
 
   items.push({
     id: "open-terminal",

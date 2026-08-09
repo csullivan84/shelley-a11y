@@ -222,8 +222,14 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 			}
 			seen[id] = true
 			svc := m.Build(conn.baseURL, conn.apiKey, httpc)
+			// Codex OAuth is the only source that sets custom headers today.
+			// Its backend-api serves Responses at {base}/responses (no /v1);
+			// oaiResponsesSvc always appends /v1 for the public OpenAI API.
 			if responses, ok := svc.(*oai.ResponsesService); ok && conn.headers != nil {
 				responses.Headers = conn.headers.Clone()
+				if strings.Contains(conn.baseURL, "chatgpt.com/backend-api/codex") {
+					responses.ModelURL = strings.TrimRight(conn.baseURL, "/")
+				}
 			}
 			label := src.labelFor(m.Provider)
 			baseURL := conn.baseURL

@@ -34,6 +34,31 @@ type Conversation struct {
 	QueuedMessages       string    `json:"queued_messages"`
 }
 
+type Herd struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Notes          string    `json:"notes"`
+	DefaultCwd     string    `json:"default_cwd"`
+	DefaultCommand string    `json:"default_command"`
+	DefaultEnv     string    `json:"default_env"`
+	Lifecycle      string    `json:"lifecycle"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type HerdMember struct {
+	ID             string    `json:"id"`
+	HerdID         string    `json:"herd_id"`
+	TerminalID     *string   `json:"terminal_id"`
+	ConversationID *string   `json:"conversation_id"`
+	Label          string    `json:"label"`
+	SortOrder      int64     `json:"sort_order"`
+	Recipe         string    `json:"recipe"`
+	DesiredState   string    `json:"desired_state"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type Message struct {
 	MessageID           string    `json:"message_id"`
 	ConversationID      string    `json:"conversation_id"`

@@ -12885,3 +12885,297 @@ kbd {
     animation-duration: 1.5s !important;
   }
 }
+
+/* ---- Herds page ---- */
+.herds-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0.75rem 1rem 1rem;
+  gap: 0.75rem;
+  overflow: auto;
+}
+.herds-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.herds-page-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.herds-page-title {
+  margin: 0;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.herds-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--p-orange-100, #ffedd5);
+  color: var(--p-orange-800, #9a3412);
+}
+.herds-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.herds-error {
+  color: var(--p-red-600, #dc2626);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--p-red-200, #fecaca);
+  border-radius: 6px;
+}
+.herds-bulk-result {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  background: var(--p-surface-100, #f3f4f6);
+}
+.herds-empty {
+  color: var(--p-text-muted-color, #6b7280);
+  margin: 1rem 0;
+}
+.herds-empty-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.herds-list-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.herds-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+.herds-list-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-decoration: none;
+  color: inherit;
+}
+.herds-list-name {
+  font-weight: 600;
+}
+.herds-list-summary,
+.herds-list-cwd {
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color, #6b7280);
+}
+.herds-list-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.herds-list-actions button {
+  font-size: 0.8rem;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+.herds-detail-summary {
+  margin: 0;
+  color: var(--p-text-muted-color, #6b7280);
+}
+.herds-filters {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.herds-filter {
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.herds-filter.active {
+  background: var(--p-primary-color, #2563eb);
+  color: #fff;
+  border-color: transparent;
+}
+.herds-detail-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) 1fr;
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1;
+}
+@media (max-width: 800px) {
+  .herds-detail-body {
+    grid-template-columns: 1fr;
+  }
+}
+.herds-members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+.herds-member {
+  text-align: left;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.herds-member.selected {
+  border-color: var(--p-primary-color, #2563eb);
+  box-shadow: 0 0 0 1px var(--p-primary-color, #2563eb);
+}
+.herds-member-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.herds-member-label {
+  font-weight: 600;
+}
+.herds-member-state {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color, #6b7280);
+}
+.herds-member-meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color, #6b7280);
+}
+.herds-member-output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+.herds-member-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.herds-member-actions button {
+  font-size: 0.8rem;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  cursor: pointer;
+}
+.herds-focus-pane {
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  border-radius: 8px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.herds-focus-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color, #e5e7eb);
+  font-size: 0.9rem;
+}
+.herds-focus-empty,
+.herds-focus-hint {
+  padding: 1rem;
+  color: var(--p-text-muted-color, #6b7280);
+}
+.herds-xterm-host {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+}
+.herds-xterm-host .terminal-instance {
+  flex: 1;
+  min-height: 240px;
+}
+.herds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+.herds-input {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  background: transparent;
+  color: inherit;
+}
+.herds-loose-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.herds-loose-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--p-content-border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.herds-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+.herds-warn-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+}
+.herds-conv-link {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+.herds-nav-link {
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--p-primary-color, #2563eb);
+  text-decoration: none;
+  font-weight: 600;
+}
+.herds-nav-link:hover {
+  text-decoration: underline;
+}
+.herds-back-btn {
+  font-size: 1.1rem;
+}

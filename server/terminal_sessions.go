@@ -227,8 +227,17 @@ func attachWithRetry(socket string, max time.Duration) (*dtach.Client, error) {
 }
 
 // Kill terminates the session (SIGTERM the dtach server group) and removes
-// its on-disk files.
+// its on-disk files. Equivalent to KillMode(id, false).
 func (t *TerminalSessions) Kill(id string) error {
+	return t.KillMode(id, false)
+}
+
+// KillMode terminates a session. force=false sends SIGTERM, waits up to 5s
+// for socket death, then escalates to SIGKILL. force=true sends SIGKILL
+// immediately. The terminal record is removed only after death is observed.
+// If the process group does not exit, the session is re-registered and an
+// error is returned so callers can report failure.
+func (t *TerminalSessions) KillMode(id string, force bool) error {
 	t.mu.Lock()
 	s := t.sessions[id]
 	if s != nil {
@@ -238,12 +247,67 @@ func (t *TerminalSessions) Kill(id string) error {
 	if s == nil {
 		return nil
 	}
-	if s.PID > 0 {
-		// Signal the process group (dtach + child shell + descendants).
-		_ = syscall.Kill(-s.PID, syscall.SIGTERM)
+
+	// In-process test spawner reports the test process PID; never signal it.
+	self := os.Getpid()
+	if s.PID > 0 && s.PID != self {
+		sig := syscall.SIGTERM
+		if force {
+			sig = syscall.SIGKILL
+		}
+		_ = syscall.Kill(-s.PID, sig)
+		waitDeadline := 5 * time.Second
+		if force {
+			waitDeadline = 2 * time.Second
+		}
+		if !t.waitSocketDead(s.Socket, waitDeadline) && !force {
+			_ = syscall.Kill(-s.PID, syscall.SIGKILL)
+			_ = t.waitSocketDead(s.Socket, 2*time.Second)
+		}
+	} else {
+		// No real process group (or in-process serve): drop the socket so
+		// listeners exit, then wait briefly for death.
+		_ = os.Remove(s.Socket)
+		_ = t.waitSocketDead(s.Socket, 2*time.Second)
+	}
+
+	if t.socketAlive(s.Socket) {
+		t.mu.Lock()
+		t.sessions[id] = s
+		t.mu.Unlock()
+		return fmt.Errorf("process did not exit")
 	}
 	t.removeFiles(id)
 	return nil
+}
+
+func (t *TerminalSessions) waitSocketDead(path string, max time.Duration) bool {
+	deadline := time.Now().Add(max)
+	for {
+		if !t.socketAlive(path) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Alive reports whether a terminal id currently has a live socket.
+func (t *TerminalSessions) Alive(id string) bool {
+	t.mu.Lock()
+	s := t.sessions[id]
+	t.mu.Unlock()
+	if s == nil {
+		return false
+	}
+	if t.socketAlive(s.Socket) {
+		return true
+	}
+	// Observed dead — drop stale record.
+	t.Forget(id)
+	return false
 }
 
 // Forget drops a session from memory and disk without signalling it; intended
