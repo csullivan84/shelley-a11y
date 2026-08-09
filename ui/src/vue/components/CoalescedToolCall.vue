@@ -164,7 +164,7 @@ const inToolDetail = useInToolDetail();
 const mountPlaceholderEl = ref<HTMLElement | null>(null);
 const nearViewport = useNearViewport(mountPlaceholderEl);
 const startedEager = !props.hasResult || inToolDetail;
-const mountSpecializedCard = computed(() => startedEager || !props.hasResult || nearViewport.value);
+const mountSpecializedCard = computed(() => startedEager || nearViewport.value);
 
 const placeholderKind = computed(() =>
   toolCardPlaceholderKind(props.toolName, props.toolInput, props.display),
