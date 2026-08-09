@@ -29,8 +29,7 @@ const (
 	ProviderFireworks Provider = "fireworks"
 	ProviderGemini    Provider = "gemini"
 	ProviderXAI       Provider = "xai"
-	// ProviderDeepSeek is fork-only (shelley-a11y): direct api.deepseek.com
-	// via $DEEPSEEK_API_KEY. Upstream freezes new env-var providers.
+	// ProviderDeepSeek identifies DeepSeek models in integration catalogs.
 	ProviderDeepSeek Provider = "deepseek"
 	ProviderBuiltIn  Provider = "builtin"
 )

@@ -48,6 +48,12 @@ type exeEnvironmentConfig struct {
 }
 
 var discoverLLMIntegrations = modelsources.DiscoverLLMIntegrations
+var readCodexOAuth = codexOAuthCredentials
+
+type codexOAuth struct {
+	AccessToken string
+	AccountID   string
+}
 
 // registerGlobalFlags binds the process-wide global flags onto fs, writing into
 // global. Extracted from main so tests can parse flags through a fresh FlagSet
@@ -415,7 +421,8 @@ func setupToolSetConfig(llmProvider claudetool.LLMServiceProvider, llmManager se
 //     provider env var overrides the gateway's implicit credential for
 //     that provider (legacy behavior).
 //  3. Provider env vars (ANTHROPIC_API_KEY, ...) when no gateway is set.
-//  4. Predictable (always available).
+//  4. OpenAI Codex OAuth from the existing Codex CLI session.
+//  5. Predictable (always available).
 //
 // Custom DB-backed models load on top of the returned set.
 func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (*server.LLMConfig, error) {
@@ -431,7 +438,10 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (
 		exeenv.Configure(env)
 	}
 
-	defaultModel, sources := buildLLMModelSources(context.Background(), global, config, logger)
+	defaultModel, sources, err := buildLLMModelSources(context.Background(), global, config, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	httpc := llmhttp.NewClient(nil)
 	return &server.LLMConfig{
@@ -440,7 +450,10 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (
 		DB:           database,
 		HTTPC:        httpc,
 		RefreshBuiltModels: func(ctx context.Context) ([]models.Built, error) {
-			_, sources := buildLLMModelSources(ctx, global, config, logger)
+			_, sources, err := buildLLMModelSources(ctx, global, config, logger)
+			if err != nil {
+				return nil, err
+			}
 			return modelsources.Build(models.All(), sources, httpc, logger), nil
 		},
 		Logger: logger,
@@ -465,14 +478,16 @@ func loadConfig(path string) (shelleyConfig, error) {
 	return config, nil
 }
 
-func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shelleyConfig, logger *slog.Logger) (string, []modelsources.Source) {
+func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shelleyConfig, logger *slog.Logger) (string, []modelsources.Source, error) {
 	defaultModel := global.DefaultModel
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 	openAIKey := os.Getenv("OPENAI_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	fireworksKey := os.Getenv("FIREWORKS_API_KEY")
-	// Fork (shelley-a11y): direct DeepSeek alongside frozen upstream env keys.
-	deepseekKey := os.Getenv("DEEPSEEK_API_KEY")
+	codex, err := readCodexOAuth()
+	if err != nil {
+		return "", nil, fmt.Errorf("read Codex OAuth credentials: %w", err)
+	}
 
 	var sources []modelsources.Source
 
@@ -502,11 +517,8 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shell
 		gateway = ""
 	}
 
-	// A direct DeepSeek key is an intentional one-shot profile: when neither
-	// --default-model nor shelley.json selected a model, prefer the ready native
-	// Flash model. Without the key, the server's normal process default remains.
-	if defaultModel == "" && deepseekKey != "" {
-		defaultModel = "deepseek-v4-flash"
+	if defaultModel == "" && codex.AccessToken != "" {
+		defaultModel = "gpt-5.6-luna"
 	}
 
 	// 2. Gateway (Anthropic, OpenAI, Fireworks, xAI). Per-provider env vars
@@ -530,14 +542,41 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shell
 		sources = append(sources, modelsources.Env(anthropicKey, openAIKey, geminiKey, fireworksKey))
 	}
 
-	// Fork: native DeepSeek models when DEEPSEEK_API_KEY is set (any path).
-	if deepseekKey != "" {
-		sources = append(sources, modelsources.EnvDeepSeek(deepseekKey))
+	if codex.AccessToken != "" {
+		sources = append(sources, modelsources.OpenAICodex(codex.AccessToken, codex.AccountID))
 	}
 
 	// 4. Predictable always available.
 	sources = append(sources, modelsources.Predictable())
-	return defaultModel, sources
+	return defaultModel, sources, nil
+}
+
+func codexOAuthCredentials() (codexOAuth, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return codexOAuth{}, err
+	}
+	data, err := os.ReadFile(home + "/.codex/auth.json")
+	if os.IsNotExist(err) {
+		return codexOAuth{}, nil
+	}
+	if err != nil {
+		return codexOAuth{}, err
+	}
+	var auth struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   struct {
+			AccessToken string `json:"access_token"`
+			AccountID   string `json:"account_id"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &auth); err != nil {
+		return codexOAuth{}, fmt.Errorf("parse ~/.codex/auth.json: %w", err)
+	}
+	if auth.AuthMode != "chatgpt" || auth.Tokens.AccessToken == "" {
+		return codexOAuth{}, nil
+	}
+	return codexOAuth{AccessToken: auth.Tokens.AccessToken, AccountID: auth.Tokens.AccountID}, nil
 }
 
 func modelsCommandDefaultID(configured string, modelList []models.Built, predictableOnly bool) string {

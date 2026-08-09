@@ -34,6 +34,7 @@ type ResponsesService struct {
 	ThinkingLevel llm.ThinkingLevel // service-level default; zero (ThinkingLevelDefault) and ThinkingLevelOff both leave the field off the wire
 	ProviderName  string            // e.g., "openai"
 	Backoff       []time.Duration   // retry backoff durations; defaults to {1s, 2s, 5s, ...} if nil
+	Headers       http.Header       // optional provider-specific request headers
 
 	// ReasoningEffort, if non-empty, is used as the reasoning.effort value sent to
 	// the OpenAI Responses API verbatim, overriding ThinkingLevel. This allows
@@ -689,6 +690,11 @@ func (s *ResponsesService) Do(ctx context.Context, ir *llm.Request) (*llm.Respon
 
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+s.APIKey)
+		for name, values := range s.Headers {
+			for _, value := range values {
+				httpReq.Header.Add(name, value)
+			}
+		}
 		if s.Org != "" {
 			httpReq.Header.Set("OpenAI-Organization", s.Org)
 		}

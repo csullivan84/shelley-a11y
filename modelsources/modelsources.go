@@ -34,6 +34,7 @@ import (
 type providerConn struct {
 	baseURL string
 	apiKey  string // "implicit" when credentials are injected at the network edge
+	headers http.Header
 }
 
 // Source is one origin from which built-in Shelley models can be
@@ -103,9 +104,6 @@ func Gateway(gatewayURL, anthropicKey, openAIKey, fireworksKey string) Source {
 
 // Env returns a Source for direct-to-provider env-var credentials. Only
 // providers with a non-empty key are included.
-//
-// Upstream freezes new env-var providers. shelley-a11y intentionally adds
-// DeepSeek via EnvDeepSeek / $DEEPSEEK_API_KEY rather than this signature.
 func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 	prov := map[models.Provider]*providerConn{}
 	labels := map[models.Provider]string{}
@@ -123,19 +121,24 @@ func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 	return Source{label: "env", providers: prov, providerLabels: labels}
 }
 
-// EnvDeepSeek is fork-only: materializes native deepseek-v4-* models when
-// DEEPSEEK_API_KEY is set. Safe no-op when key is empty.
-func EnvDeepSeek(deepseekKey string) Source {
-	if deepseekKey == "" {
-		return Source{label: "env", providers: map[models.Provider]*providerConn{}}
+// OpenAICodex returns an OpenAI Responses source authenticated with the
+// user's existing Codex OAuth session.
+func OpenAICodex(accessToken, accountID string) Source {
+	headers := http.Header{
+		"User-Agent": []string{"codex_cli_rs/0.0.0 (Shelley)"},
+		"Originator": []string{"codex_cli_rs"},
+	}
+	if accountID != "" {
+		headers.Set("ChatGPT-Account-ID", accountID)
 	}
 	return Source{
-		label: "env",
+		label: "OpenAI Codex OAuth",
 		providers: map[models.Provider]*providerConn{
-			models.ProviderDeepSeek: {apiKey: deepseekKey},
-		},
-		providerLabels: map[models.Provider]string{
-			models.ProviderDeepSeek: "$DEEPSEEK_API_KEY",
+			models.ProviderOpenAI: {
+				baseURL: "https://chatgpt.com/backend-api/codex",
+				apiKey:  accessToken,
+				headers: headers,
+			},
 		},
 	}
 }
@@ -219,6 +222,9 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 			}
 			seen[id] = true
 			svc := m.Build(conn.baseURL, conn.apiKey, httpc)
+			if responses, ok := svc.(*oai.ResponsesService); ok && conn.headers != nil {
+				responses.Headers = conn.headers.Clone()
+			}
 			label := src.labelFor(m.Provider)
 			baseURL := conn.baseURL
 			if baseURL == "" {

@@ -80,6 +80,27 @@ func TestEnvSourceLabels(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexBuildsLuna(t *testing.T) {
+	bs := Build(models.All(), []Source{OpenAICodex("token", "account")}, &http.Client{}, nil)
+	b := findBuilt(bs, "gpt-5.6-luna")
+	if b == nil {
+		t.Fatal("gpt-5.6-luna not built")
+	}
+	if b.Source != "OpenAI Codex OAuth" {
+		t.Errorf("source = %q", b.Source)
+	}
+	if b.BaseURL != "https://chatgpt.com/backend-api/codex" {
+		t.Errorf("base URL = %q", b.BaseURL)
+	}
+	responses, ok := b.Service.(*oai.ResponsesService)
+	if !ok {
+		t.Fatalf("service type = %T", b.Service)
+	}
+	if got := responses.Headers.Get("ChatGPT-Account-ID"); got != "account" {
+		t.Errorf("account header = %q", got)
+	}
+}
+
 func TestGatewaySourceLabels(t *testing.T) {
 	// Plain gateway.
 	bs := Build(models.All(), []Source{Gateway("https://gw.example.com", "", "", "")}, &http.Client{}, nil)
