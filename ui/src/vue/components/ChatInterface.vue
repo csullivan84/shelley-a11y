@@ -561,6 +561,7 @@ const props = withDefaults(
     openTerminalTrigger?: number;
     modelsRefreshTrigger?: number;
     cwdSyncTrigger?: number;
+    onCwdChange?: (cwd: string) => void;
     onOpenModelsModal?: () => void;
     onOpenFileFinder?: () => void;
     ephemeralTerminals: EphemeralTerminal[];
@@ -841,6 +842,7 @@ const cwdInitialized = ref(false);
 function setSelectedCwd(cwd: string) {
   selectedCwd.value = cwd;
   localStorage.setItem("shelley_selected_cwd", cwd);
+  props.onCwdChange?.(cwd);
 }
 
 const cwdError = ref<string | null>(null);

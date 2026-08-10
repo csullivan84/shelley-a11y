@@ -109,6 +109,7 @@
             :open-terminal-trigger="terminalTrigger"
             :models-refresh-trigger="modelsRefreshTrigger"
             :cwd-sync-trigger="cwdSyncTrigger"
+            :on-cwd-change="setWorkspaceDirectory"
             :on-open-models-modal="() => (modelsModalOpen = true)"
             :on-open-file-finder="openFileFinder"
             :ephemeral-terminals="ephemeralTerminals"
@@ -699,7 +700,7 @@ function openProviderSetup() {
 // ---- conversation actions ----
 function startNewConversation() {
   if (currentConversation.value?.cwd) {
-    localStorage.setItem("shelley_selected_cwd", currentConversation.value.cwd);
+    setWorkspaceDirectory(currentConversation.value.cwd);
   }
   currentConversationId.value = null;
   viewedConversation.value = null;
@@ -708,8 +709,7 @@ function startNewConversation() {
 }
 
 function startNewConversationWithCwd(cwd: string) {
-  localStorage.setItem("shelley_selected_cwd", cwd);
-  workspaceDirectory.value = cwd;
+  setWorkspaceDirectory(cwd);
   currentConversationId.value = null;
   viewedConversation.value = null;
   window.history.replaceState({}, "", "/new");
@@ -718,7 +718,7 @@ function startNewConversationWithCwd(cwd: string) {
 }
 
 function setConversationCwd(cwd: string) {
-  localStorage.setItem("shelley_selected_cwd", cwd);
+  setWorkspaceDirectory(cwd);
   const conv =
     conversations.value.find((c) => c.conversation_id === currentConversationId.value) ||
     (viewedConversation.value?.conversation_id === currentConversationId.value
@@ -818,9 +818,12 @@ function openFileInEditor(absPath: string) {
   workspaceOpenRequest.value = { path: absPath, nonce: Date.now() };
 }
 
-function changeWorkspaceDirectory(path: string) {
+function setWorkspaceDirectory(path: string) {
   localStorage.setItem("shelley_selected_cwd", path);
   workspaceDirectory.value = path;
+}
+
+function changeWorkspaceDirectory(path: string) {
   startNewConversationWithCwd(path);
 }
 
