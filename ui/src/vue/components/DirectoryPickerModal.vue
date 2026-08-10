@@ -18,6 +18,8 @@
           v-model="inputPath"
           class="directory-picker-input"
           placeholder="/path/to/directory"
+          aria-label="Directory path"
+          :aria-describedby="currentPathId"
           @keydown="handleInputKeyDown"
         />
       </div>
@@ -42,8 +44,8 @@
           </ol>
           <span v-if="filterPrefix" class="directory-picker-filter">/{{ filterPrefix }}*</span>
         </nav>
-        <span class="sr-only" role="status" aria-live="polite">
-          Current directory: {{ displayDir.path }}
+        <span :id="currentPathId" class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          Current path: {{ displayDir.path }}
         </span>
         <span
           v-if="displayDir.git_head_subject"
@@ -283,6 +285,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "close"): void; (e: "select", path: string): void }>();
 
 const createInputId = useId();
+const currentPathId = useId();
 
 const inputPath = ref(
   props.initialPath

@@ -5,6 +5,7 @@
         type="button"
         class="workspace-dir"
         :title="cwd"
+        :aria-label="`Workspace directory: ${cwd}`"
         @click="showDirectoryPicker = true"
       >
         {{ directoryName }}

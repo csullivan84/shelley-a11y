@@ -164,6 +164,8 @@
       <span class="status-field-label">{{ t("dirLabel") }}</span>
       <button
         :class="`status-chip${cwdError ? ' status-chip-error' : ''}`"
+        :title="selectedCwd || '(no cwd)'"
+        :aria-label="`Working directory: ${selectedCwd || 'none'}`"
         :disabled="sending"
         @click="onOpenDirectoryPicker"
       >
