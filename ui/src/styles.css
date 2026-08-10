@@ -1772,6 +1772,20 @@ body {
   font-weight: 500;
 }
 
+.patch-tool-open-file {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.patch-tool-open-file:hover,
+.patch-tool-open-file:focus-visible {
+  color: var(--link-color);
+  text-decoration: underline;
+}
+
 .patch-tool-running {
   font-size: 0.75rem;
   color: var(--text-secondary);

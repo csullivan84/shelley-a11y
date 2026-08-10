@@ -31,7 +31,16 @@
     >
       <div class="patch-tool-summary">
         <span class="patch-tool-emoji" :class="{ running: isRunning }" aria-hidden="true">🖋️</span>
-        <span class="patch-tool-filename" :title="filename">{{ filename }}</span>
+        <button
+          v-if="workspace"
+          type="button"
+          class="patch-tool-filename patch-tool-open-file"
+          :title="`Open ${filename} in workspace`"
+          @click.stop="openPatchedFile"
+        >
+          {{ filename }}
+        </button>
+        <span v-else class="patch-tool-filename" :title="filename">{{ filename }}</span>
         <span v-if="isComplete && hasError" class="patch-tool-error">
           <span aria-hidden="true">✗</span>
           <span class="sr-only">failed</span>
@@ -164,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from "vue";
+import { computed, inject, ref, watch, onMounted, onUnmounted } from "vue";
 import type { LLMContent } from "../../../types";
 import { announceToolA11y } from "../../../services/a11yAnnouncer";
 import { useToolExpanded } from "../../composables/toolDetail";
@@ -182,6 +191,7 @@ import { isDarkModeActive } from "../../../services/theme";
 import { useFileDiffInstance } from "../../composables/fileDiffInstance";
 import { extractChangedSymbols } from "../../../utils/changedSymbols";
 import { useNearViewport } from "../../composables/nearViewport";
+import { WorkspaceContextKey } from "../../composables/workspaceContext";
 
 // LocalStorage key for side-by-side preference
 const STORAGE_KEY_SIDE_BY_SIDE = "shelley-diff-side-by-side";
@@ -377,6 +387,15 @@ const path = computed(() => {
   }
   return typeof ti === "string" ? ti : "";
 });
+const workspace = inject(WorkspaceContextKey, null);
+
+function openPatchedFile() {
+  if (!workspace || !path.value) return;
+  const fullPath = path.value.startsWith("/")
+    ? path.value
+    : `${workspace.cwd.value.replace(/\/+$/, "")}/${path.value}`;
+  workspace.openFile(fullPath);
+}
 
 const displayData = computed<PatchDisplayData | null>(() => {
   const d = props.display;

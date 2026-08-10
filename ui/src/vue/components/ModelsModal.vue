@@ -19,6 +19,12 @@
     <template #title-right>
       <div class="models-header-actions">
         <Button
+          label="Providers"
+          severity="secondary"
+          size="small"
+          @click="emit('openProviders')"
+        />
+        <Button
           :label="refreshing ? t('refreshingModels') : t('refreshModels')"
           severity="secondary"
           size="small"
@@ -187,7 +193,11 @@ import { useI18n } from "../composables/i18n";
 import { api, customModelsApi, type AvailableModel, type CustomModel } from "../../services/api";
 
 const props = defineProps<{ isOpen: boolean }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "modelsChanged"): void }>();
+const emit = defineEmits<{
+  (e: "close"): void;
+  (e: "modelsChanged"): void;
+  (e: "openProviders"): void;
+}>();
 
 const { t } = useI18n();
 

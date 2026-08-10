@@ -85,7 +85,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const saveStatus = ref<SaveStatus>("idle");
 let monaco: typeof Monaco | null = null;
-let saveTimer: number | null = null;
+const saveTimers = new Map<string, number>();
 let statusTimer: number | null = null;
 let contentListener: Monaco.IDisposable | null = null;
 let switchingModel = false;
@@ -195,14 +195,22 @@ function openFile(path: string) {
 }
 
 function scheduleSave(path: string) {
-  if (saveTimer) window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => void save(path), 500);
+  const existing = saveTimers.get(path);
+  if (existing) window.clearTimeout(existing);
+  saveTimers.set(
+    path,
+    window.setTimeout(() => {
+      saveTimers.delete(path);
+      void save(path);
+    }, 500),
+  );
 }
 
 async function save(path: string) {
-  if (saveTimer) {
-    window.clearTimeout(saveTimer);
-    saveTimer = null;
+  const timer = saveTimers.get(path);
+  if (timer) {
+    window.clearTimeout(timer);
+    saveTimers.delete(path);
   }
   const model = models.get(path);
   if (!model || !dirtyPaths.value.has(path)) return;
@@ -266,10 +274,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  if (saveTimer) window.clearTimeout(saveTimer);
+  for (const timer of saveTimers.values()) window.clearTimeout(timer);
+  saveTimers.clear();
   if (statusTimer) window.clearTimeout(statusTimer);
-  const active = activePath.value;
-  if (active) void save(active);
+  for (const path of dirtyPaths.value) void save(path);
   contentListener?.dispose();
   editor.value?.dispose();
   for (const model of models.values()) model.dispose();

@@ -47,27 +47,26 @@
       />
       <div v-if="filesError" class="workspace-nav-state error" role="alert">{{ filesError }}</div>
       <div v-else-if="filesLoading" class="workspace-nav-state">Loading files…</div>
-      <div v-else class="workspace-file-list" role="list" aria-label="Files">
-        <button
-          v-for="file in files"
-          :key="file.path"
-          type="button"
-          class="workspace-file-row"
-          role="listitem"
-          :title="file.path"
-          @click="emit('open-file', absolutePath(file.path))"
-        >
-          <span class="workspace-file-name">{{ file.path }}</span>
-          <span
-            v-if="gitStatus[file.path]"
-            class="workspace-file-status"
-            :aria-label="gitStatus[file.path]"
+      <ul v-else class="workspace-file-list" aria-label="Files">
+        <li v-for="file in files" :key="file.path">
+          <button
+            type="button"
+            class="workspace-file-row"
+            :title="file.path"
+            @click="emit('open-file', absolutePath(file.path))"
           >
-            {{ statusLetter(gitStatus[file.path]) }}
-          </span>
-        </button>
-        <p v-if="files.length === 0" class="workspace-nav-state">No matching files.</p>
-      </div>
+            <span class="workspace-file-name">{{ file.path }}</span>
+            <span
+              v-if="gitStatus[file.path]"
+              class="workspace-file-status"
+              :aria-label="gitStatus[file.path]"
+            >
+              {{ statusLetter(gitStatus[file.path]) }}
+            </span>
+          </button>
+        </li>
+        <li v-if="files.length === 0" class="workspace-nav-state">No matching files.</li>
+      </ul>
       <p v-if="filesTruncated" class="workspace-nav-note">Showing the first 500 matches.</p>
     </template>
 
@@ -341,6 +340,12 @@ watch(view, (next) => {
   min-height: 0;
   flex: 1;
   overflow: auto;
+}
+
+.workspace-file-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .workspace-file-row {

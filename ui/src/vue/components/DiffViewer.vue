@@ -73,6 +73,14 @@
           {{ readingMode === "text" ? "Visual diff" : "Text diff" }}
         </button>
         <button
+          v-if="canOpenSelectedFile"
+          type="button"
+          class="diff-viewer-mode-btn"
+          @click="openSelectedFile"
+        >
+          Open file
+        </button>
+        <button
           v-tooltip.top="`Git directory: ${cwd}\nClick to change`"
           class="diff-viewer-dir-btn"
           :aria-label="`Git directory: ${cwd}. Click to change`"
@@ -230,6 +238,15 @@
                 ✏️
               </button>
             </div>
+            <button
+              v-if="canOpenSelectedFile"
+              v-tooltip.top="'Open current file in workspace editor'"
+              type="button"
+              class="diff-viewer-mode-btn"
+              @click="openSelectedFile"
+            >
+              Open file
+            </button>
             <VimToggle :enabled="vimEnabled" @change="setVimEnabled" />
             <button
               v-tooltip.top="`Git directory: ${cwd}\nClick to change`"
@@ -476,7 +493,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import type * as Monaco from "monaco-editor";
 import { api } from "../../services/api";
 import { announceA11y } from "../../services/a11yAnnouncer";
@@ -488,6 +505,7 @@ import {
   truncateWithEllipsis,
   useMonacoComments,
 } from "../composables/monacoComments";
+import { WorkspaceContextKey } from "../composables/workspaceContext";
 import VimToggle from "./VimToggle.vue";
 import CommentDialog from "./CommentDialog.vue";
 import CommitPicker from "./CommitPicker.vue";
@@ -565,6 +583,16 @@ const selectedDiff = ref<string | null>(null);
 const selectedTo = ref<"working" | "self">("working");
 const files = ref<GitFileInfo[]>([]);
 const selectedFile = ref<string | null>(null);
+const workspace = inject(WorkspaceContextKey, null);
+const canOpenSelectedFile = computed(
+  () => !!workspace && !!gitRoot.value && !!selectedFile.value && !isCommitMessageFile(selectedFile.value),
+);
+
+function openSelectedFile() {
+  if (!workspace || !gitRoot.value || !selectedFile.value || isCommitMessageFile(selectedFile.value)) return;
+  workspace.openFile(`${gitRoot.value.replace(/\/+$/, "")}/${selectedFile.value}`);
+  emit("close");
+}
 const fileDiff = ref<GitFileDiff | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);

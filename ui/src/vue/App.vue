@@ -24,7 +24,7 @@
   </div>
 
   <OnboardingPage
-    v-else-if="onboardingStatus && !onboardingStatus.complete"
+    v-else-if="onboardingStatus && (!onboardingStatus.complete || showProviderSetup)"
     :status="onboardingStatus"
     @complete="handleOnboardingComplete"
   />
@@ -211,6 +211,7 @@
           }
         "
         @models-changed="modelsRefreshTrigger++"
+        @open-providers="openProviderSetup"
       />
 
       <NotificationsModal
@@ -281,6 +282,7 @@ import { initialDrawerCollapsed, saveDrawerCollapsedPreference } from "../utils/
 import { perfCount } from "../utils/perf";
 import { useI18n } from "./composables/i18n";
 import { ConversationsListKey, CurrentConversationIdKey } from "./composables/subagentLive";
+import { WorkspaceContextKey } from "./composables/workspaceContext";
 import { useFeatureFlag } from "./composables/featureFlags";
 import PerfHud from "./components/PerfHud.vue";
 
@@ -443,6 +445,7 @@ const workspaceDirectory = ref(
 const onboardingStatus = ref<OnboardingStatus | null>(null);
 const onboardingLoading = ref(true);
 const onboardingError = ref<string | null>(null);
+const showProviderSetup = ref(false);
 
 // ---- non-reactive refs ----
 let initialSlugResolved = false;
@@ -530,6 +533,7 @@ const workspaceCwd = computed(
     window.__SHELLEY_INIT__?.home_dir ||
     "",
 );
+provide(WorkspaceContextKey, { cwd: workspaceCwd, openFile: openFileInEditor });
 
 // ---- navigation ----
 function navigateToNextConversation() {
@@ -682,8 +686,14 @@ async function loadOnboarding() {
 
 function handleOnboardingComplete(status: OnboardingStatus) {
   onboardingStatus.value = status;
+  showProviderSetup.value = false;
   modelsRefreshTrigger.value++;
   startNewConversation();
+}
+
+function openProviderSetup() {
+  modelsModalOpen.value = false;
+  showProviderSetup.value = true;
 }
 
 // ---- conversation actions ----
