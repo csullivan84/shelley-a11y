@@ -32,6 +32,16 @@
         <template v-else-if="saveStatus === 'saved'">Saved</template>
         <template v-else-if="saveStatus === 'error'">Save failed</template>
       </span>
+      <label class="workspace-autosave-toggle">
+        <input v-model="autosaveEnabled" type="checkbox" />
+        <span>Auto-save</span>
+      </label>
+      <Button
+        label="Save"
+        size="small"
+        :disabled="!activeDirty || saveStatus === 'saving'"
+        @click="saveActive"
+      />
       <Button
         label="Ask Shelley"
         size="small"
@@ -56,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import type * as Monaco from "monaco-editor";
 import Button from "primevue/button";
 import { api } from "../../services/api";
@@ -84,10 +94,13 @@ const dirtyPaths = ref(new Set<string>());
 const loading = ref(false);
 const error = ref<string | null>(null);
 const saveStatus = ref<SaveStatus>("idle");
+const autosaveEnabled = ref(false);
+const activeDirty = computed(() => !!activePath.value && dirtyPaths.value.has(activePath.value));
 let monaco: typeof Monaco | null = null;
 const saveTimers = new Map<string, number>();
 let statusTimer: number | null = null;
 let contentListener: Monaco.IDisposable | null = null;
+let editorKeyListener: Monaco.IDisposable | null = null;
 let switchingModel = false;
 
 function storageKey() {
@@ -137,6 +150,30 @@ async function ensureEditor() {
     wordWrap: "off",
     accessibilitySupport: "auto",
   });
+  editorKeyListener = editor.value.onKeyDown((event) => {
+    if (event.keyCode !== monaco?.KeyCode.Tab) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const backward = event.shiftKey;
+    queueMicrotask(() => focusAdjacentElement(backward));
+  });
+}
+
+const focusableSelector =
+  "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function focusAdjacentElement(backward: boolean) {
+  const current = document.activeElement;
+  if (!(current instanceof HTMLElement)) return;
+  const focusable = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+    (element) => {
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+    },
+  );
+  const currentIndex = focusable.indexOf(current);
+  if (currentIndex < 0) return;
+  focusable[currentIndex + (backward ? -1 : 1)]?.focus();
 }
 
 async function modelFor(path: string): Promise<Monaco.editor.ITextModel> {
@@ -195,6 +232,7 @@ function openFile(path: string) {
 }
 
 function scheduleSave(path: string) {
+  if (!autosaveEnabled.value) return;
   const existing = saveTimers.get(path);
   if (existing) window.clearTimeout(existing);
   saveTimers.set(
@@ -204,6 +242,10 @@ function scheduleSave(path: string) {
       void save(path);
     }, 500),
   );
+}
+
+function saveActive() {
+  if (activePath.value) void save(activePath.value);
 }
 
 async function save(path: string) {
@@ -231,7 +273,7 @@ async function save(path: string) {
 }
 
 async function closeTab(path: string) {
-  await save(path);
+  if (autosaveEnabled.value) await save(path);
   const index = tabs.value.indexOf(path);
   tabs.value = tabs.value.filter((tab) => tab !== path);
   if (activePath.value === path) {
@@ -277,7 +319,11 @@ onBeforeUnmount(() => {
   for (const timer of saveTimers.values()) window.clearTimeout(timer);
   saveTimers.clear();
   if (statusTimer) window.clearTimeout(statusTimer);
-  for (const path of dirtyPaths.value) void save(path);
+  if (autosaveEnabled.value) {
+    for (const path of dirtyPaths.value) void save(path);
+  }
+  editorKeyListener?.dispose();
+  editorKeyListener = null;
   contentListener?.dispose();
   editor.value?.dispose();
   for (const model of models.values()) model.dispose();
@@ -358,6 +404,15 @@ onBeforeUnmount(() => {
   color: var(--text-tertiary);
   font-size: 0.8rem;
   text-align: right;
+}
+
+.workspace-autosave-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .workspace-editor-body {
