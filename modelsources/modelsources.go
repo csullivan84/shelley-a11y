@@ -229,6 +229,7 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 				responses.Headers = conn.headers.Clone()
 				if strings.Contains(conn.baseURL, "chatgpt.com/backend-api/codex") {
 					responses.ModelURL = strings.TrimRight(conn.baseURL, "/")
+					responses.OmitMaxOutputTokens = true
 				}
 			}
 			label := src.labelFor(m.Provider)

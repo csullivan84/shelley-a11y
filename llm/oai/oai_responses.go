@@ -35,6 +35,9 @@ type ResponsesService struct {
 	ProviderName  string            // e.g., "openai"
 	Backoff       []time.Duration   // retry backoff durations; defaults to {1s, 2s, 5s, ...} if nil
 	Headers       http.Header       // optional provider-specific request headers
+	// OmitMaxOutputTokens disables max_output_tokens for Responses-compatible
+	// backends that reject the public OpenAI parameter, such as Codex OAuth.
+	OmitMaxOutputTokens bool
 
 	// ReasoningEffort, if non-empty, is used as the reasoning.effort value sent to
 	// the OpenAI Responses API verbatim, overriding ThinkingLevel. This allows
@@ -563,13 +566,15 @@ func (s *ResponsesService) Do(ctx context.Context, ir *llm.Request) (*llm.Respon
 
 	// Create the request
 	req := responsesRequest{
-		Model:           model.ModelName,
-		Instructions:    responsesInstructionsFromLLMSystem(ir.System),
-		Store:           false,
-		Stream:          true,
-		Input:           allInput,
-		Tools:           tools,
-		MaxOutputTokens: cmp.Or(s.MaxTokens, DefaultMaxTokens),
+		Model:        model.ModelName,
+		Instructions: responsesInstructionsFromLLMSystem(ir.System),
+		Store:        false,
+		Stream:       true,
+		Input:        allInput,
+		Tools:        tools,
+	}
+	if !s.OmitMaxOutputTokens {
+		req.MaxOutputTokens = cmp.Or(s.MaxTokens, DefaultMaxTokens)
 	}
 	if openAIResponses {
 		req.Include = []string{"reasoning.encrypted_content"}

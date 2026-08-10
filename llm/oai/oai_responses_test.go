@@ -738,6 +738,44 @@ func TestResponsesServiceDoSendsMaxOutputTokens(t *testing.T) {
 	}
 }
 
+func TestResponsesServiceDoCanOmitMaxOutputTokens(t *testing.T) {
+	var gotReq map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode req: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(responsesResponse{
+			ID:     "responses-test",
+			Status: "completed",
+			Model:  "test-model",
+			Output: []responsesOutputItem{{Type: "message", Role: "assistant", Content: []responsesContent{{Type: "output_text", Text: "ok"}}}},
+			Usage:  responsesUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
+		})
+	}))
+	defer server.Close()
+
+	svc := &ResponsesService{
+		APIKey:              "test-api-key",
+		Model:               modelForTest("test-model"),
+		ModelURL:            server.URL,
+		OmitMaxOutputTokens: true,
+	}
+
+	_, err := svc.Do(context.Background(), &llm.Request{
+		Messages: []llm.Message{{
+			Role:    llm.MessageRoleUser,
+			Content: []llm.Content{{Type: llm.ContentTypeText, Text: "hi"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	if _, ok := gotReq["max_output_tokens"]; ok {
+		t.Fatalf("request unexpectedly contains max_output_tokens: %#v", gotReq)
+	}
+}
+
 func TestResponsesServiceDo(t *testing.T) {
 	// Create a mock Responses server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

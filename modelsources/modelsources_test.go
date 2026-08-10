@@ -103,6 +103,9 @@ func TestOpenAICodexBuildsLuna(t *testing.T) {
 	if responses.ModelURL != "https://chatgpt.com/backend-api/codex" {
 		t.Errorf("ModelURL = %q, want https://chatgpt.com/backend-api/codex", responses.ModelURL)
 	}
+	if !responses.OmitMaxOutputTokens {
+		t.Error("Codex OAuth service must omit max_output_tokens")
+	}
 }
 
 func TestGatewaySourceLabels(t *testing.T) {
