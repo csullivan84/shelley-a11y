@@ -532,6 +532,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/herds/{herd_id}/close", s.handleHerdCloseAll)
 	mux.HandleFunc("GET /api/herds/{herd_id}/close-preview", s.handleHerdClosePreview)
 	mux.HandleFunc("GET /api/terminals/loose", s.handleLooseTerminals)
+	mux.HandleFunc("DELETE /api/terminals/loose", s.handleLooseTerminalsDelete)
 
 	// Custom models API
 	mux.Handle("/api/custom-models", http.HandlerFunc(s.handleCustomModels))

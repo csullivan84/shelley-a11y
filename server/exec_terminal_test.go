@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,82 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 )
+
+func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
+	srv, database, _ := newTestServer(t)
+	srv.terminals.SetSpawner(InProcessSpawner)
+
+	conversation, err := database.CreateConversation(context.Background(), nil, true, nil, nil, db.ConversationOptions{})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	owned, ownedClient, err := srv.terminals.SpawnForConversation(
+		conversation.ConversationID,
+		"sleep 60",
+		t.TempDir(),
+		80,
+		24,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("spawn owned terminal: %v", err)
+	}
+	_ = ownedClient.Close()
+	t.Cleanup(func() { _ = srv.terminals.KillMode(owned.ID, true) })
+
+	loose, looseClient, err := srv.terminals.Spawn("sleep 60", t.TempDir(), 80, 24, nil)
+	if err != nil {
+		t.Fatalf("spawn loose terminal: %v", err)
+	}
+	_ = looseClient.Close()
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/terminals", nil)
+	listWriter := httptest.NewRecorder()
+	srv.handleTerminalsList(listWriter, listReq)
+	if listWriter.Code != http.StatusOK {
+		t.Fatalf("list terminals: %d %s", listWriter.Code, listWriter.Body.String())
+	}
+	var listed []struct {
+		ID             string `json:"id"`
+		OwnerType      string `json:"owner_type"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(listWriter.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode terminal list: %v", err)
+	}
+	var foundOwned bool
+	for _, item := range listed {
+		if item.ID == owned.ID {
+			foundOwned = true
+			if item.OwnerType != "conversation" || item.ConversationID != conversation.ConversationID {
+				t.Fatalf("owned terminal metadata: %+v", item)
+			}
+		}
+	}
+	if !foundOwned {
+		t.Fatalf("owned terminal missing from list: %s", listWriter.Body.String())
+	}
+
+	looseReq := httptest.NewRequest(http.MethodGet, "/api/terminals/loose", nil)
+	looseWriter := httptest.NewRecorder()
+	srv.handleLooseTerminals(looseWriter, looseReq)
+	if looseWriter.Code != http.StatusOK || !strings.Contains(looseWriter.Body.String(), loose.ID) {
+		t.Fatalf("loose list: %d %s", looseWriter.Code, looseWriter.Body.String())
+	}
+
+	cleanupReq := httptest.NewRequest(http.MethodDelete, "/api/terminals/loose", nil)
+	cleanupWriter := httptest.NewRecorder()
+	srv.handleLooseTerminalsDelete(cleanupWriter, cleanupReq)
+	if cleanupWriter.Code != http.StatusOK || !strings.Contains(cleanupWriter.Body.String(), loose.ID) {
+		t.Fatalf("loose cleanup: %d %s", cleanupWriter.Code, cleanupWriter.Body.String())
+	}
+	if srv.terminals.Alive(loose.ID) {
+		t.Fatalf("loose terminal survived cleanup: %s", loose.ID)
+	}
+	if !srv.terminals.Alive(owned.ID) {
+		t.Fatalf("conversation-owned terminal was cleaned up: %s", owned.ID)
+	}
+}
 
 func TestExecTerminal_SimpleCommand(t *testing.T) {
 	t.Parallel()

@@ -24,13 +24,17 @@ import (
 // it survives the parent shelley exiting; it terminates when the user's
 // command exits or the session is killed.
 type TerminalSession struct {
-	ID        string    `json:"id"`
-	Command   string    `json:"command"`
-	Cwd       string    `json:"cwd"`
-	Socket    string    `json:"socket"`
-	LogFile   string    `json:"log_file"`
-	PID       int       `json:"pid"`
-	CreatedAt time.Time `json:"created_at"`
+	ID      string `json:"id"`
+	Command string `json:"command"`
+	Cwd     string `json:"cwd"`
+	// ConversationID owns terminals opened from a conversation. Herd-owned
+	// terminals are associated through herd_members, while an empty value
+	// means the terminal is intentionally loose.
+	ConversationID string    `json:"conversation_id,omitempty"`
+	Socket         string    `json:"socket"`
+	LogFile        string    `json:"log_file"`
+	PID            int       `json:"pid"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // SpawnerFunc starts a dtach server hosting `cmd` on the given socket. The
@@ -154,6 +158,17 @@ func (t *TerminalSessions) Get(id string) *TerminalSession {
 // attach inline closes the race where a fast-exiting command tears down the
 // socket before any external attach can succeed.
 func (t *TerminalSessions) Spawn(command, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
+	return t.spawn(command, cwd, cols, rows, extraEnv, "")
+}
+
+// SpawnForConversation launches a terminal owned by conversationID. An empty
+// conversation ID creates a loose terminal, which can later be assigned to a
+// herd.
+func (t *TerminalSessions) SpawnForConversation(conversationID, command, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
+	return t.spawn(command, cwd, cols, rows, extraEnv, conversationID)
+}
+
+func (t *TerminalSessions) spawn(command, cwd string, cols, rows uint16, extraEnv []string, conversationID string) (*TerminalSession, *dtach.Client, error) {
 	if command == "" {
 		return nil, nil, errors.New("terminals: empty command")
 	}
@@ -189,13 +204,14 @@ func (t *TerminalSessions) Spawn(command, cwd string, cols, rows uint16, extraEn
 	}
 
 	sess := &TerminalSession{
-		ID:        id,
-		Command:   command,
-		Cwd:       cwd,
-		Socket:    socket,
-		LogFile:   logFile,
-		PID:       pid,
-		CreatedAt: time.Now().UTC(),
+		ID:             id,
+		Command:        command,
+		Cwd:            cwd,
+		ConversationID: conversationID,
+		Socket:         socket,
+		LogFile:        logFile,
+		PID:            pid,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	data, err := json.MarshalIndent(sess, "", "  ")

@@ -465,7 +465,7 @@ func TestAttachOrSpawnDoesNotRestartUnknownTerminal(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	srv.terminals.SetSpawner(InProcessSpawner)
 	before := len(srv.terminals.List())
-	_, _, err := srv.attachOrSpawn("missing-terminal", "echo must-not-run", t.TempDir(), 80, 24, nil)
+	_, _, err := srv.attachOrSpawn("missing-terminal", "echo must-not-run", t.TempDir(), 80, 24, nil, "")
 	if err == nil {
 		t.Fatal("expected strict reattach error")
 	}

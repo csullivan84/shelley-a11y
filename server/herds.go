@@ -1481,47 +1481,25 @@ func runBounded[T any](items []T, concurrency int, fn func(T) bulkItemAPI) []bul
 	return out
 }
 
-// handleLooseTerminals lists live terminals not assigned to any herd.
+// handleLooseTerminals lists live terminals without a conversation or herd
+// owner. These are the only sessions eligible for bulk loose cleanup.
 func (s *Server) handleLooseTerminals(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	ctx := r.Context()
-	assigned := map[string]bool{}
-	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
-		rows, err := q.ListAllHerdMembers(ctx)
-		if err != nil {
-			return err
-		}
-		for _, m := range rows {
-			if m.TerminalID != nil && *m.TerminalID != "" {
-				assigned[*m.TerminalID] = true
-			}
-		}
-		return nil
-	})
+	owners, err := s.terminalOwners(ctx)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "list_loose_failed", err.Error(), nil)
 		return
 	}
-	type dto struct {
-		ID        string `json:"id"`
-		Command   string `json:"command"`
-		Cwd       string `json:"cwd"`
-		CreatedAt string `json:"created_at"`
-	}
-	out := []dto{}
+	out := []terminalDTO{}
 	for _, t := range s.terminals.List() {
-		if assigned[t.ID] {
+		if t.ConversationID != "" || owners[t.ID].HerdID != "" {
 			continue
 		}
-		out = append(out, dto{
-			ID:        t.ID,
-			Command:   t.Command,
-			Cwd:       t.Cwd,
-			CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
-		})
+		out = append(out, makeTerminalDTO(t, owners[t.ID]))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
 	"shelley.exe.dev/claudetool"
+	"shelley.exe.dev/db/generated"
 	"shelley.exe.dev/dtach"
 )
 
@@ -85,7 +87,7 @@ func (s *Server) handleExecWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	extraEnv := buildTerminalEnv(conversationID, slug, model, userEmail, cwd, s.listenPort)
-	sess, dc, err := s.attachOrSpawn(termID, cmd, cwd, cols, rows, extraEnv)
+	sess, dc, err := s.attachOrSpawn(termID, cmd, cwd, cols, rows, extraEnv, conversationID)
 	if err != nil {
 		wsjson.Write(ctx, conn, ExecMessage{Type: "error", Data: err.Error()})
 		conn.Close(websocket.StatusInternalError, "attach failed")
@@ -119,7 +121,7 @@ func buildTerminalEnv(conversationID, slug, model, userEmail, cwd string, listen
 	}.Environ(cwd)
 }
 
-func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
+func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extraEnv []string, conversationID string) (*TerminalSession, *dtach.Client, error) {
 	unlock := s.terminals.LockAttach()
 	defer unlock()
 	if termID != "" {
@@ -136,7 +138,7 @@ func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extra
 		}
 		return nil, nil, fmt.Errorf("unknown terminal id %s", termID)
 	}
-	return s.terminals.Spawn(cmd, cwd, cols, rows, extraEnv)
+	return s.terminals.SpawnForConversation(conversationID, cmd, cwd, cols, rows, extraEnv)
 }
 
 // bridgeWS shuttles bytes between the browser websocket and the dtach client.
@@ -213,24 +215,87 @@ func (s *Server) bridgeWS(ctx context.Context, conn *websocket.Conn, dc *dtach.C
 
 // handleTerminalsList responds with the current set of persistent terminals.
 func (s *Server) handleTerminalsList(w http.ResponseWriter, r *http.Request) {
-	type dto struct {
-		ID        string `json:"id"`
-		Command   string `json:"command"`
-		Cwd       string `json:"cwd"`
-		CreatedAt string `json:"created_at"`
+	owners, err := s.terminalOwners(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "list_terminal_owners_failed", err.Error(), nil)
+		return
 	}
 	list := s.terminals.List()
-	out := make([]dto, 0, len(list))
+	out := make([]terminalDTO, 0, len(list))
 	for _, t := range list {
-		out = append(out, dto{
-			ID:        t.ID,
-			Command:   t.Command,
-			Cwd:       t.Cwd,
-			CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		})
+		out = append(out, makeTerminalDTO(t, owners[t.ID]))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+type terminalOwner struct {
+	HerdID   string
+	HerdName string
+}
+
+type terminalDTO struct {
+	ID             string `json:"id"`
+	Command        string `json:"command"`
+	Cwd            string `json:"cwd"`
+	CreatedAt      string `json:"created_at"`
+	OwnerType      string `json:"owner_type"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	HerdID         string `json:"herd_id,omitempty"`
+	HerdName       string `json:"herd_name,omitempty"`
+}
+
+// terminalOwners returns the herd assignment for each live terminal. Direct
+// conversation ownership lives on the terminal session itself; herd
+// ownership lives in the database so detach/move operations remain atomic.
+func (s *Server) terminalOwners(ctx context.Context) (map[string]terminalOwner, error) {
+	owners := make(map[string]terminalOwner)
+	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
+		herds, err := q.ListHerds(ctx)
+		if err != nil {
+			return err
+		}
+		herdNames := make(map[string]string, len(herds))
+		for _, herd := range herds {
+			herdNames[herd.ID] = herd.Name
+		}
+		members, err := q.ListAllHerdMembers(ctx)
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			if member.TerminalID == nil || *member.TerminalID == "" {
+				continue
+			}
+			owners[*member.TerminalID] = terminalOwner{
+				HerdID:   member.HerdID,
+				HerdName: herdNames[member.HerdID],
+			}
+		}
+		return nil
+	})
+	return owners, err
+}
+
+func makeTerminalDTO(t *TerminalSession, owner terminalOwner) terminalDTO {
+	ownerType := "loose"
+	conversationID := ""
+	if owner.HerdID != "" {
+		ownerType = "herd"
+	} else if t.ConversationID != "" {
+		ownerType = "conversation"
+		conversationID = t.ConversationID
+	}
+	return terminalDTO{
+		ID:             t.ID,
+		Command:        t.Command,
+		Cwd:            t.Cwd,
+		CreatedAt:      t.CreatedAt.UTC().Format(time.RFC3339),
+		OwnerType:      ownerType,
+		ConversationID: conversationID,
+		HerdID:         owner.HerdID,
+		HerdName:       owner.HerdName,
+	}
 }
 
 // handleTerminalDelete kills a session and removes its on-disk record.
@@ -245,4 +310,29 @@ func (s *Server) handleTerminalDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleLooseTerminalsDelete closes every live terminal without an owner.
+// Herd and conversation-owned terminals require their owning context for
+// disposal and are never included in this bulk operation.
+func (s *Server) handleLooseTerminalsDelete(w http.ResponseWriter, r *http.Request) {
+	owners, err := s.terminalOwners(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "list_terminal_owners_failed", err.Error(), nil)
+		return
+	}
+	closed := make([]string, 0)
+	for _, terminal := range s.terminals.List() {
+		if terminal.ConversationID != "" || owners[terminal.ID].HerdID != "" {
+			continue
+		}
+		if err := s.terminals.Kill(terminal.ID); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "close_loose_failed", err.Error(), map[string]any{
+				"terminal_id": terminal.ID,
+			})
+			return
+		}
+		closed = append(closed, terminal.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"closed": closed})
 }

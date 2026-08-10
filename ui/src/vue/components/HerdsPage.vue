@@ -97,11 +97,6 @@
         class="herds-empty-actions"
       >
         <Button label="Create herd" @click="beginCreateHerd" />
-        <Button
-          label="Create herd from open terminals"
-          severity="secondary"
-          @click="createFromLoose"
-        />
       </div>
       <ul v-else class="herds-list-ul" aria-label="Herds">
         <li v-for="h in visibleHerds" :key="h.id" class="herds-list-item">
@@ -150,6 +145,41 @@
           </div>
         </li>
       </ul>
+
+      <section class="herds-loose-section" aria-labelledby="loose-terminals-heading">
+        <div class="herds-loose-header">
+          <div>
+            <h2 id="loose-terminals-heading" class="herds-section-title">Loose terminals</h2>
+            <p class="herds-section-help">
+              Terminals without a conversation or herd. Assign them to a herd or close them here.
+            </p>
+          </div>
+          <div class="herds-list-actions">
+            <Button
+              v-if="looseTerminals.length > 0"
+              label="Create herd from loose"
+              severity="secondary"
+              @click="createFromLoose"
+            />
+            <Button
+              v-if="looseTerminals.length > 0"
+              label="Close loose terminals"
+              severity="danger"
+              @click="beginCloseLoose"
+            />
+          </div>
+        </div>
+        <p v-if="looseTerminals.length === 0" class="herds-empty">No loose terminals.</p>
+        <ul v-else class="herds-loose-list" aria-label="Loose terminals">
+          <li v-for="t in looseTerminals" :key="t.id">
+            <div class="herds-loose-item">
+              <strong>{{ t.command }}</strong>
+              <span>{{ t.cwd }}</span>
+              <span class="herds-mono">{{ t.id }}</span>
+            </div>
+          </li>
+        </ul>
+      </section>
     </div>
 
     <!-- Detail -->
@@ -354,6 +384,21 @@
       </template>
     </Modal>
 
+    <Modal
+      :is-open="!!closeLooseConfirm"
+      title="Close loose terminals"
+      @close="closeLooseConfirm = false"
+    >
+      <p>
+        Close {{ looseTerminals.length }} loose terminal{{ looseTerminals.length === 1 ? "" : "s" }}?
+        Terminals assigned to a conversation or herd will not be affected.
+      </p>
+      <template #footer>
+        <Button label="Cancel" text severity="secondary" @click="closeLooseConfirm = false" />
+        <Button label="Close loose terminals" severity="danger" @click="confirmCloseLoose" />
+      </template>
+    </Modal>
+
     <!-- Close one member -->
     <Modal
       :is-open="!!pendingCloseMember"
@@ -496,7 +541,6 @@ const emit = defineEmits<{
   (e: "back"): void;
   (e: "navigate-herd", id: string | null): void;
   (e: "open-conversation", id: string): void;
-  (e: "focus-terminal", term: { termId: string; command: string; cwd: string }): void;
   (e: "terminals-closed", ids: string[]): void;
 }>();
 
@@ -524,6 +568,7 @@ const createName = ref("");
 const createCwd = ref("");
 const createCmd = ref("bash");
 const looseTerminals = ref<LooseTerminal[]>([]);
+const closeLooseConfirm = ref(false);
 const closeConfirm = ref<{
   herdId: string;
   live: number;
@@ -616,9 +661,12 @@ async function loadList() {
   loading.value = true;
   error.value = null;
   try {
-    herds.value = await apiJSON<Herd[]>(
-      showArchived.value ? "/api/herds?archived=1" : "/api/herds",
-    );
+    const [list, loose] = await Promise.all([
+      apiJSON<Herd[]>(showArchived.value ? "/api/herds?archived=1" : "/api/herds"),
+      apiJSON<LooseTerminal[]>("/api/terminals/loose"),
+    ]);
+    herds.value = list;
+    looseTerminals.value = loose;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -744,6 +792,22 @@ async function createFromLoose() {
   }
 }
 
+function beginCloseLoose() {
+  if (looseTerminals.value.length > 0) closeLooseConfirm.value = true;
+}
+
+async function confirmCloseLoose() {
+  closeLooseConfirm.value = false;
+  try {
+    const result = await apiJSON<{ closed: string[] }>("/api/terminals/loose", { method: "DELETE" });
+    if (result.closed.length > 0) emit('terminals-closed', result.closed);
+    looseTerminals.value = [];
+    liveAnnouncement.value = `Closed ${result.closed.length} loose terminal${result.closed.length === 1 ? "" : "s"}.`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
 async function setLifecycle(lifecycle: string) {
   if (!detail.value) return;
   try {
@@ -839,11 +903,6 @@ function selectMember(m: HerdMember) {
 function focusMember(m: HerdMember) {
   if (!m.terminal_id || m.process_state !== "running") return;
   focusedTermId.value = m.terminal_id;
-  emit("focus-terminal", {
-    termId: m.terminal_id,
-    command: m.command || m.recipe.command || "bash",
-    cwd: m.cwd || m.recipe.cwd || "",
-  });
   liveAnnouncement.value = `Focused terminal for ${m.label}`;
 }
 
@@ -956,7 +1015,7 @@ async function createNewTerminalMember() {
 watch(showAttach, async (open) => {
   if (!open) return;
   try {
-    looseTerminals.value = await apiJSON("/api/terminals/loose");
+    looseTerminals.value = await apiJSON<LooseTerminal[]>("/api/terminals/loose");
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }

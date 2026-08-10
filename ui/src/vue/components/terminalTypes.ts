@@ -14,4 +14,7 @@ export interface EphemeralTerminal {
   // "attached". When reconnecting to a known session, set this up front so the
   // websocket re-attaches rather than spawning a new session.
   termId?: string;
+  conversationId?: string;
+  herdId?: string;
+  herdName?: string;
 }

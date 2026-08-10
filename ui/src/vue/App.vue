@@ -77,7 +77,6 @@
           @back="leaveHerds"
           @navigate-herd="navigateHerd"
           @open-conversation="openConversationFromHerd"
-          @focus-terminal="focusTerminalFromHerd"
           @terminals-closed="removeClosedTerminals"
         />
         <WorkspaceShell
@@ -112,7 +111,7 @@
             :on-cwd-change="setWorkspaceDirectory"
             :on-open-models-modal="() => (modelsModalOpen = true)"
             :on-open-file-finder="openFileFinder"
-            :ephemeral-terminals="ephemeralTerminals"
+            :ephemeral-terminals="conversationTerminals"
             :set-ephemeral-terminals="setEphemeralTerminals"
             :on-terminal-attached="handleTerminalAttached"
             :on-terminal-close="handleTerminalClose"
@@ -355,23 +354,6 @@ function openConversationFromHerd(conversationId: string) {
   }
 }
 
-function focusTerminalFromHerd(term: { termId: string; command: string; cwd: string }) {
-  // Ensure the terminal is present in the global dock so it stays available after leaving herds.
-  setEphemeralTerminals((prev) => {
-    if (prev.some((t) => t.termId === term.termId)) return prev;
-    return [
-      ...prev,
-      {
-        id: `herd-${term.termId}`,
-        command: term.command,
-        cwd: term.cwd,
-        createdAt: new Date(),
-        termId: term.termId,
-      },
-    ];
-  });
-}
-
 const closedTerminalIds = new Set<string>();
 
 function removeClosedTerminals(termIds: string[]) {
@@ -498,6 +480,16 @@ const currentConversation = computed<ConversationWithState | undefined>(() => {
   }
   return undefined;
 });
+
+// A terminal belongs to the conversation that created it. Herd terminals are
+// rendered inside their herd control room, and loose terminals are managed
+// from the Herds page rather than leaking into every conversation's dock.
+const conversationTerminals = computed(() =>
+  ephemeralTerminals.value.filter(
+    (terminal) =>
+      !terminal.herdId && terminal.conversationId === currentConversationId.value,
+  ),
+);
 
 const mostRecentCwd = computed(
   () =>
@@ -1008,22 +1000,44 @@ onMounted(() => {
   let cancelled = false;
   fetch("/api/terminals")
     .then((r) => (r.ok ? r.json() : []))
-    .then((rows: Array<{ id: string; command: string; cwd: string; created_at: string }>) => {
+    .then(
+      (
+        rows: Array<{
+          id: string;
+          command: string;
+          cwd: string;
+          created_at: string;
+          owner_type?: "conversation" | "herd" | "loose";
+          conversation_id?: string;
+          herd_id?: string;
+          herd_name?: string;
+        }>,
+      ) => {
       if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
       setEphemeralTerminals((prev) => {
         const have = new Set(prev.map((tm) => tm.termId).filter(Boolean));
         const restored: EphemeralTerminal[] = rows
-          .filter((r) => !have.has(r.id) && !closedTerminalIds.has(r.id))
+          .filter(
+            (r) =>
+              r.owner_type === "conversation" &&
+              !!r.conversation_id &&
+              !have.has(r.id) &&
+              !closedTerminalIds.has(r.id),
+          )
           .map((r) => ({
             id: r.id,
             termId: r.id,
             command: r.command,
             cwd: r.cwd,
             createdAt: new Date(r.created_at || Date.now()),
+            conversationId: r.owner_type === "conversation" ? r.conversation_id : undefined,
+            herdId: r.owner_type === "herd" ? r.herd_id : undefined,
+            herdName: r.owner_type === "herd" ? r.herd_name : undefined,
           }));
         return [...restored, ...prev];
       });
-    })
+      },
+    )
     .catch((err) => console.warn("failed to fetch persistent terminals:", err));
   terminalsHydrationCancel = () => {
     cancelled = true;

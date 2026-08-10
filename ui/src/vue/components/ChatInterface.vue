@@ -2307,6 +2307,7 @@ async function sendMessage(message: string) {
           window.__SHELLEY_INIT__?.default_cwd ||
           "/",
         createdAt: new Date(),
+        conversationId: props.conversationId || undefined,
       };
       props.setEphemeralTerminals((prev) => [...prev, terminal]);
       const firstWord = shellCommand.split(/\s+/)[0];
@@ -2447,6 +2448,7 @@ function openInAppTerminal() {
     command: 'exec "${SHELL:-bash}" -i',
     cwd,
     createdAt: new Date(),
+    conversationId: props.conversationId || undefined,
   };
   props.setEphemeralTerminals((prev) => [...prev, terminal]);
   terminalAutoFocusId.value = terminal.id;
