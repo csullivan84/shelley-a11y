@@ -184,6 +184,9 @@ func (b *BrowseTools) screencastStart(format string, quality, maxWidth, maxHeigh
 		"-f", inputFormat,
 		"-framerate", "4",
 		"-i", "pipe:0",
+		// Chrome may report an odd viewport dimension (observed on macOS).
+		// yuv420p requires even width and height, so pad by at most one pixel.
+		"-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
 		"-c:v", "libx264",
 		"-pix_fmt", "yuv420p",
 		"-preset", "fast",

@@ -30,6 +30,7 @@ import (
 	"shelley.exe.dev/server/notifications"
 	"shelley.exe.dev/subpub"
 	"shelley.exe.dev/ui"
+	"shelley.exe.dev/unixsocket"
 )
 
 // APIMessage is the message format sent to clients
@@ -1890,7 +1891,12 @@ func (s *Server) StartWithListeners(tcpListener net.Listener, socketPath string)
 	var socketServer *http.Server
 	var actualSocketPath string
 	if socketPath != "" {
-		actualSocketPath = resolveSocketPath(socketPath, s.logger)
+		var socketErr error
+		actualSocketPath, socketErr = unixsocket.Path(socketPath)
+		if socketErr != nil {
+			return socketErr
+		}
+		actualSocketPath = resolveSocketPath(actualSocketPath, s.logger)
 
 		// Ensure the directory exists
 		if err := os.MkdirAll(filepath.Dir(actualSocketPath), 0o700); err != nil {

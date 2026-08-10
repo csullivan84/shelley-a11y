@@ -3,52 +3,39 @@ package server
 import (
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
 
-// procState returns the single-character process state from /proc/<pid>/stat
-// (e.g. "R", "S", "Z"), or "" if the process no longer exists (fully reaped).
-func procState(pid int) string {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return ""
-	}
-	// Format: "pid (comm) state ...". comm may contain spaces/parens, so the
-	// state field is the first token after the final ')'.
-	s := string(data)
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ')' {
-			if i+2 < len(s) {
-				return string(s[i+2])
-			}
-			break
-		}
-	}
-	return ""
+// processExists uses the portable Unix signal 0 probe. It remains true for a
+// zombie until Wait reaps it, then becomes false on both macOS and Linux.
+func processExists(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
 }
 
 // TestSpawnSubprocessReapsChild verifies that a spawned dtach child that exits
 // is reaped rather than left as a zombie. Regression test for the
 // Release()-without-Wait() bug that produced "[shelley] <defunct>" processes.
 //
-// The child here is /bin/true, which exits immediately (ignoring the dtach
-// args). With the bug, the child becomes a zombie ("Z") and stays that way for
-// the lifetime of the test process. With the fix, the background Wait() reaps
-// it and its /proc entry disappears.
+// The child here is the true executable from PATH, which exits immediately
+// (ignoring the dtach args). With the bug, the child becomes a zombie and stays
+// that way for the lifetime of the test process. With the fix, the background
+// Wait reaps it and the signal 0 probe reports that it no longer exists.
 func TestSpawnSubprocessReapsChild(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("reaping is observed via /proc/<pid>/stat, which is Linux-only")
-	}
 	dir := t.TempDir()
 	ts, err := NewTerminalSessions(dir, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		t.Fatalf("NewTerminalSessions: %v", err)
 	}
-	ts.exe = "/bin/true"
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Fatalf("find true executable: %v", err)
+	}
+	ts.exe = truePath
 
 	socket := filepath.Join(dir, "sock")
 	logFile := filepath.Join(dir, "log")
@@ -60,15 +47,14 @@ func TestSpawnSubprocessReapsChild(t *testing.T) {
 		t.Fatalf("expected positive pid, got %d", pid)
 	}
 
-	// Poll until the child is fully reaped (no /proc entry). A child stuck in
-	// the zombie state would remain readable forever, so a lingering "Z"
-	// (or any other persistent state) fails the test.
+	// Poll until the child is fully reaped. A child stuck in the zombie state
+	// remains visible to signal 0, so it fails the test.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if procState(pid) == "" {
+		if !processExists(pid) {
 			return // reaped — success
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("child pid %d was not reaped; state=%q (expected gone)", pid, procState(pid))
+	t.Fatalf("child pid %d was not reaped", pid)
 }

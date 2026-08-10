@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/creack/pty"
+	"shelley.exe.dev/unixsocket"
 )
 
 // ServerOptions configures Serve.
@@ -52,20 +53,24 @@ func Serve(opts ServerOptions) error {
 	if opts.Command == "" {
 		return errors.New("dtach: empty command")
 	}
+	socketPath, err := unixsocket.Path(opts.SocketPath)
+	if err != nil {
+		return fmt.Errorf("dtach: socket path: %w", err)
+	}
 
-	if err := os.MkdirAll(filepath.Dir(opts.SocketPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return fmt.Errorf("dtach: mkdir socket dir: %w", err)
 	}
-	_ = os.Remove(opts.SocketPath)
-	ln, err := net.Listen("unix", opts.SocketPath)
+	_ = os.Remove(socketPath)
+	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("dtach: listen: %w", err)
 	}
 	// Restrict access to the user.
-	_ = os.Chmod(opts.SocketPath, 0o600)
+	_ = os.Chmod(socketPath, 0o600)
 	defer func() {
 		ln.Close()
-		_ = os.Remove(opts.SocketPath)
+		_ = os.Remove(socketPath)
 	}()
 
 	cmd := exec.Command(opts.Command, opts.Args...)

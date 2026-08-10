@@ -80,8 +80,9 @@ func TestFileReader_NestedDir(t *testing.T) {
 	if !ok {
 		t.Fatal("file reader bailed in nested dir")
 	}
-	if state.Worktree != dir {
-		t.Errorf("Worktree = %q, want %q", state.Worktree, dir)
+	wantWorktree := canonicalTestPath(t, dir)
+	if state.Worktree != wantWorktree {
+		t.Errorf("Worktree = %q, want %q", state.Worktree, wantWorktree)
 	}
 	if state.Subject != "root commit" {
 		t.Errorf("Subject = %q, want %q", state.Subject, "root commit")

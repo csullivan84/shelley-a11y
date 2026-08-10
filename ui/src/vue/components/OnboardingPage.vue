@@ -9,7 +9,7 @@
 
       <form @submit.prevent="complete">
         <fieldset v-if="status.candidates.length" class="provider-group">
-          <legend>Import providers found on this Mac</legend>
+          <legend>Import providers found on this computer</legend>
           <p class="provider-help">
             Shelley copies selected credentials into its private local configuration.
           </p>

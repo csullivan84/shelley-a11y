@@ -240,8 +240,8 @@ func (b *BashTool) makeBashCommand(ctx context.Context, command string, out io.W
 	cmd.WaitDelay = 15 * time.Second // prevent indefinite hangs when child processes keep pipes open
 	// Strip any inherited SHELLEY_* vars so we control them explicitly below.
 	env := stripShelleyEnv(os.Environ())
-	env = append(env, "SKETCH=1")          // signal that this has been run by Sketch, sometimes useful for scripts
-	env = append(env, "EDITOR=/bin/false") // interactive editors won't work
+	env = append(env, "SKETCH=1")     // signal that this has been run by Sketch, sometimes useful for scripts
+	env = append(env, "EDITOR=false") // interactive editors won't work
 	env = append(env, b.Env.Environ(cmd.Dir)...)
 	cmd.Env = env
 	return cmd

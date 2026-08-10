@@ -34,8 +34,10 @@ Object.defineProperty(Intl, "DateTimeFormat", {
 try {
   const { formatAbsolute, formatDay, formatTime } = await import("./messageTime");
   const date = new Date("2026-08-04T12:34:56Z");
-  const sameYear = new Date("2026-01-01T00:00:00Z");
-  const otherYear = new Date("2025-01-01T00:00:00Z");
+  // Midday dates avoid crossing a calendar-year boundary when this suite runs
+  // west of UTC (2026-01-01T00:00Z is still 2025 in America/Chicago).
+  const sameYear = new Date("2026-06-01T12:00:00Z");
+  const otherYear = new Date("2025-06-01T12:00:00Z");
   const expectedTime = new originalDateTimeFormat([], {
     hour: "numeric",
     minute: "2-digit",

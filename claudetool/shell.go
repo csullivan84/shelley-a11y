@@ -238,7 +238,7 @@ func (s *ShellTool) run(ctx context.Context, req shellInput) llm.ToolOut {
 	env = append(
 		env,
 		"SKETCH=1",
-		"EDITOR=/bin/false",
+		"EDITOR=false",
 		`GIT_SEQUENCE_EDITOR=echo "To do an interactive rebase, run it in a tmux session." && exit 1`,
 	)
 	env = append(env, s.Env.Environ(cmd.Dir)...)

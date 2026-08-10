@@ -6,7 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"shelley.exe.dev/platformpath"
 )
+
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := platformpath.Existing(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
 
 func TestGetGitState_NotARepo(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -48,8 +59,9 @@ func TestGetGitState_RegularRepo(t *testing.T) {
 	if !state.IsRepo {
 		t.Error("expected IsRepo to be true")
 	}
-	if state.Worktree != tmpDir {
-		t.Errorf("expected Worktree %q, got %q", tmpDir, state.Worktree)
+	wantWorktree := canonicalTestPath(t, tmpDir)
+	if state.Worktree != wantWorktree {
+		t.Errorf("expected Worktree %q, got %q", wantWorktree, state.Worktree)
 	}
 	// Default branch might be master or main depending on git config
 	if state.Branch != "master" && state.Branch != "main" {
@@ -92,8 +104,9 @@ func TestGetGitState_Worktree(t *testing.T) {
 	if !mainState.IsRepo {
 		t.Error("expected main repo IsRepo to be true")
 	}
-	if mainState.Worktree != mainRepo {
-		t.Errorf("expected main Worktree %q, got %q", mainRepo, mainState.Worktree)
+	wantMain := canonicalTestPath(t, mainRepo)
+	if mainState.Worktree != wantMain {
+		t.Errorf("expected main Worktree %q, got %q", wantMain, mainState.Worktree)
 	}
 
 	// Check state in worktree
@@ -101,8 +114,9 @@ func TestGetGitState_Worktree(t *testing.T) {
 	if !worktreeState.IsRepo {
 		t.Error("expected worktree IsRepo to be true")
 	}
-	if worktreeState.Worktree != worktreeDir {
-		t.Errorf("expected worktree Worktree %q, got %q", worktreeDir, worktreeState.Worktree)
+	wantLinkedWorktree := canonicalTestPath(t, worktreeDir)
+	if worktreeState.Worktree != wantLinkedWorktree {
+		t.Errorf("expected worktree Worktree %q, got %q", wantLinkedWorktree, worktreeState.Worktree)
 	}
 	if worktreeState.Branch != "feature" {
 		t.Errorf("expected worktree Branch 'feature', got %q", worktreeState.Branch)

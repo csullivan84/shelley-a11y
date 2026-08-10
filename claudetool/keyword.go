@@ -12,6 +12,7 @@ import (
 
 	"shelley.exe.dev/llm"
 	"shelley.exe.dev/llm/llmhttp"
+	"shelley.exe.dev/platformpath"
 )
 
 // LLMServiceProvider defines the interface for getting LLM services
@@ -121,7 +122,11 @@ func FindRepoRoot(wd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to find git repository root: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	root, err := platformpath.Existing(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", fmt.Errorf("normalize git repository root: %w", err)
+	}
+	return root, nil
 }
 
 // keywordRun is the main implementation using the LLM provider

@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"shelley.exe.dev/unixsocket"
 )
 
 // Client is a programmatic attachment to a dtach session. Use Attach to dial
@@ -20,6 +22,10 @@ type Client struct {
 // Attach dials the dtach server at socketPath. If the socket is missing or
 // dead, returns ErrNotRunning.
 func Attach(socketPath string) (*Client, error) {
+	socketPath, err := unixsocket.Path(socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNotRunning, err)
+	}
 	if _, err := os.Stat(socketPath); err != nil {
 		return nil, ErrNotRunning
 	}

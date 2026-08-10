@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"shelley.exe.dev/dtach"
+	"shelley.exe.dev/unixsocket"
 )
 
 // TerminalSession is the on-disk + in-memory record of a persistent terminal.
@@ -105,6 +106,10 @@ func (t *TerminalSessions) scan() {
 }
 
 func (t *TerminalSessions) socketAlive(path string) bool {
+	path, err := unixsocket.Path(path)
+	if err != nil {
+		return false
+	}
 	if _, err := os.Stat(path); err != nil {
 		return false
 	}
@@ -118,7 +123,10 @@ func (t *TerminalSessions) socketAlive(path string) bool {
 
 func (t *TerminalSessions) removeFiles(id string) {
 	os.Remove(filepath.Join(t.dir, id+".json"))
-	os.Remove(filepath.Join(t.dir, id+".sock"))
+	socket := filepath.Join(t.dir, id+".sock")
+	if resolved, err := unixsocket.Path(socket); err == nil {
+		os.Remove(resolved)
+	}
 	os.Remove(filepath.Join(t.dir, id+".log"))
 }
 
@@ -267,7 +275,9 @@ func (t *TerminalSessions) KillMode(id string, force bool) error {
 	} else {
 		// No real process group (or in-process serve): drop the socket so
 		// listeners exit, then wait briefly for death.
-		_ = os.Remove(s.Socket)
+		if socket, err := unixsocket.Path(s.Socket); err == nil {
+			_ = os.Remove(socket)
+		}
 		_ = t.waitSocketDead(s.Socket, 2*time.Second)
 	}
 

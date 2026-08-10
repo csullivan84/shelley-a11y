@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"shelley.exe.dev/platformpath"
 )
 
 // GitState represents the current state of a git repository.
@@ -92,7 +94,10 @@ func shortHash(full string) string {
 // findWorktree walks up from dir to the worktree root (the directory holding
 // .git) and returns it along with the resolved .git directory.
 func findWorktree(dir string) (worktree, gitDir string, ok bool) {
-	dir = filepath.Clean(dir)
+	dir, err := platformpath.Existing(dir)
+	if err != nil {
+		return "", "", false
+	}
 	for {
 		dotgit := filepath.Join(dir, ".git")
 		if fi, err := os.Stat(dotgit); err == nil {
@@ -232,7 +237,10 @@ func getGitStateFromGit(dir string) *GitState {
 		return state
 	}
 	state.IsRepo = true
-	state.Worktree = strings.TrimSpace(string(output))
+	state.Worktree, err = platformpath.Existing(strings.TrimSpace(string(output)))
+	if err != nil {
+		return &GitState{}
+	}
 
 	// Get the current commit hash (short form)
 	cmd = exec.Command("git", "rev-parse", "--short", "HEAD")

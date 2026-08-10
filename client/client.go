@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"shelley.exe.dev/unixsocket"
 )
 
 // DefaultSocketPath returns the default Unix socket path (~/.config/shelley/shelley.sock).
@@ -68,6 +70,10 @@ func (cc *clientConfig) newHTTPClient() (*http.Client, string, error) {
 
 	switch scheme {
 	case "unix":
+		address, err = unixsocket.Path(address)
+		if err != nil {
+			return nil, "", err
+		}
 		transport := &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 				return net.Dial("unix", address)
