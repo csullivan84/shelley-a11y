@@ -9,8 +9,28 @@
      (synchronous) API and needs no worker pool, so no provider is rendered
      here. -->
 <template>
+  <div v-if="onboardingLoading" class="loading-container">
+    <div class="loading-content">
+      <div class="spinner" style="margin: 0 auto 1rem" />
+      <p class="text-secondary">Loading Shelley…</p>
+    </div>
+  </div>
+
+  <div v-else-if="onboardingError" class="error-container" role="alert" aria-live="assertive">
+    <div class="error-content">
+      <p class="error-message" style="margin-bottom: 1rem">{{ onboardingError }}</p>
+      <Button label="Retry" @click="loadOnboarding" />
+    </div>
+  </div>
+
+  <OnboardingPage
+    v-else-if="onboardingStatus && !onboardingStatus.complete"
+    :status="onboardingStatus"
+    @complete="handleOnboardingComplete"
+  />
+
   <!-- Loading gate -->
-  <div v-if="loading && conversations.length === 0" class="loading-container">
+  <div v-else-if="loading && conversations.length === 0" class="loading-container">
     <div class="loading-content">
       <div class="spinner" style="margin: 0 auto 1rem" />
       <p class="text-secondary">{{ t("loading") }}</p>
@@ -60,38 +80,46 @@
           @focus-terminal="focusTerminalFromHerd"
           @terminals-closed="removeClosedTerminals"
         />
-        <ChatInterface
+        <WorkspaceShell
           v-else
-          :conversation-id="currentConversationId"
-          :stream-status="streamStatus"
-          :reconnect-nonce="reconnectNonce"
-          :on-open-drawer="() => (drawerOpen = true)"
-          :on-new-conversation="startNewConversation"
-          :on-select-conversation="selectConversation"
-          :on-archive-conversation="archiveFromChat"
-          :current-conversation="currentConversation"
-          :on-conversation-update="updateConversation"
-          :on-first-message="handleFirstMessage"
-          :on-draft-created="onDraftCreated"
-          :on-distill-new-generation="handleDistillNewGeneration"
-          :most-recent-cwd="mostRecentCwd"
-          :is-drawer-collapsed="drawerCollapsed"
-          :on-toggle-drawer-collapse="toggleDrawerCollapsed"
-          :open-diff-viewer-trigger="diffViewerTrigger"
-          :open-git-graph-trigger="gitGraphTrigger"
-          :open-terminal-trigger="terminalTrigger"
-          :models-refresh-trigger="modelsRefreshTrigger"
-          :cwd-sync-trigger="cwdSyncTrigger"
-          :on-open-models-modal="() => (modelsModalOpen = true)"
-          :on-open-file-finder="openFileFinder"
-          :ephemeral-terminals="ephemeralTerminals"
-          :set-ephemeral-terminals="setEphemeralTerminals"
-          :on-terminal-attached="handleTerminalAttached"
-          :on-terminal-close="handleTerminalClose"
-          :navigate-user-message-trigger="navigateUserMessageTrigger"
-          :on-conversation-unarchived="handleConversationUnarchived"
-          :external-comment-text="editorCommentText"
-        />
+          :cwd="workspaceCwd"
+          :open-request="workspaceOpenRequest"
+          @comment="onEditorComment"
+          @change-directory="changeWorkspaceDirectory"
+          @open-diff="diffViewerTrigger++"
+        >
+          <ChatInterface
+            :conversation-id="currentConversationId"
+            :stream-status="streamStatus"
+            :reconnect-nonce="reconnectNonce"
+            :on-open-drawer="() => (drawerOpen = true)"
+            :on-new-conversation="startNewConversation"
+            :on-select-conversation="selectConversation"
+            :on-archive-conversation="archiveFromChat"
+            :current-conversation="currentConversation"
+            :on-conversation-update="updateConversation"
+            :on-first-message="handleFirstMessage"
+            :on-draft-created="onDraftCreated"
+            :on-distill-new-generation="handleDistillNewGeneration"
+            :most-recent-cwd="workspaceCwd"
+            :is-drawer-collapsed="drawerCollapsed"
+            :on-toggle-drawer-collapse="toggleDrawerCollapsed"
+            :open-diff-viewer-trigger="diffViewerTrigger"
+            :open-git-graph-trigger="gitGraphTrigger"
+            :open-terminal-trigger="terminalTrigger"
+            :models-refresh-trigger="modelsRefreshTrigger"
+            :cwd-sync-trigger="cwdSyncTrigger"
+            :on-open-models-modal="() => (modelsModalOpen = true)"
+            :on-open-file-finder="openFileFinder"
+            :ephemeral-terminals="ephemeralTerminals"
+            :set-ephemeral-terminals="setEphemeralTerminals"
+            :on-terminal-attached="handleTerminalAttached"
+            :on-terminal-close="handleTerminalClose"
+            :navigate-user-message-trigger="navigateUserMessageTrigger"
+            :on-conversation-unarchived="handleConversationUnarchived"
+            :external-comment-text="editorCommentText"
+          />
+        </WorkspaceShell>
       </div>
 
       <CommandPalette
@@ -212,17 +240,6 @@
         @select="openFileInEditor"
       />
 
-      <EditableFileModal
-        v-if="editorFilePath"
-        :is-open="!!editorFilePath"
-        :path="editorFilePath"
-        :title="`Edit ${tildifyPath(editorFilePath)}`"
-        :load-url="`/api/read-file?path=${encodeURIComponent(editorFilePath)}`"
-        commentable
-        @close="editorFilePath = null"
-        @comment="onEditorComment"
-      />
-
       <div v-if="drawerOpen" class="backdrop hide-on-desktop" @click="drawerOpen = false" />
     </div>
 
@@ -241,17 +258,17 @@ import ModelsModal from "./components/ModelsModal.vue";
 import NotificationsModal from "./components/NotificationsModal.vue";
 import FeatureFlagsModal from "./components/FeatureFlagsModal.vue";
 import FileFinderModal from "./components/FileFinderModal.vue";
-import EditableFileModal from "./components/EditableFileModal.vue";
+import OnboardingPage from "./components/OnboardingPage.vue";
+import WorkspaceShell from "./components/WorkspaceShell.vue";
 import Button from "primevue/button";
 import type { EphemeralTerminal } from "./components/terminalTypes";
 import { focusMessageInputIfUnfocused } from "../utils/focusMessageInput";
-import { tildifyPath } from "../utils/tildify";
 import {
   type Conversation,
   type ConversationWithState,
   type ConversationListPatchEvent,
 } from "../types";
-import { api } from "../services/api";
+import { api, type OnboardingStatus } from "../services/api";
 import { messageStore } from "../services/messageStore";
 import {
   reduceConversationListPatch,
@@ -259,7 +276,6 @@ import {
 } from "../services/conversationListStream";
 import { connectGlobalStream, type StreamStatus } from "../services/globalStream";
 import { handleNotificationEvent } from "../services/notifications";
-import { loadCachedDraft } from "../services/draftCache";
 import { initializeA11yTrace } from "../services/a11yTrace";
 import { initialDrawerCollapsed, saveDrawerCollapsedPreference } from "../utils/drawerStartup";
 import { perfCount } from "../utils/perf";
@@ -301,18 +317,11 @@ function getHerdIdFromPath(): string | null {
   return null;
 }
 
-// A brand-new-conversation draft composed offline never reaches the server
-// (createDraft fails), so it survives only in localStorage under the "new"
-// slot. On reopen we land on "/" and would otherwise auto-select the most
-// recent conversation, orphaning that text. Detect a pending non-empty cached
-// draft so startup can keep the user in the new-conversation view instead.
-function hasPendingNewDraft(): boolean {
-  return !!loadCachedDraft(null)?.value.trim();
-}
-
 // Captured BEFORE render so URL-updating effects don't clobber it.
 const initialSlugFromUrl = getSlugFromPath();
-const initialIsNew = isNewPath() || (!getSlugFromPath() && hasPendingNewDraft());
+// The root is the workspace and a fresh Shelley query. Existing conversations
+// are opened only through an explicit /c/:slug URL or the conversation drawer.
+const initialIsNew = !getSlugFromPath();
 const herdsRouteActive = ref(isHerdsPath());
 const herdsRouteId = ref<string | null>(getHerdIdFromPath());
 
@@ -412,7 +421,7 @@ const notificationsModalOpen = ref(false);
 const featureFlagsModalOpen = ref(false);
 // Fuzzy file finder (Cmd/Ctrl+Shift+P) + the generic editor it opens.
 const fileFinderOpen = ref(false);
-const editorFilePath = ref<string | null>(null);
+const workspaceOpenRequest = ref<{ path: string; nonce: number } | null>(null);
 // Comment submitted from the file editor's comment mode, to be injected into
 // the chat message input. Fresh object per submit so the watcher always fires.
 const editorCommentText = ref<{ text: string } | null>(null);
@@ -425,6 +434,15 @@ const ephemeralTerminals = ref<EphemeralTerminal[]>([]);
 const streamStatus = ref<StreamStatus>("connected");
 const reconnectNonce = ref(0);
 const showActiveTrigger = ref(0);
+const workspaceDirectory = ref(
+  localStorage.getItem("shelley_selected_cwd") ||
+    window.__SHELLEY_INIT__?.default_cwd ||
+    window.__SHELLEY_INIT__?.home_dir ||
+    "",
+);
+const onboardingStatus = ref<OnboardingStatus | null>(null);
+const onboardingLoading = ref(true);
+const onboardingError = ref<string | null>(null);
 
 // ---- non-reactive refs ----
 let initialSlugResolved = false;
@@ -501,6 +519,15 @@ const finderDir = computed(
     mostRecentCwd.value ||
     localStorage.getItem("shelley_selected_cwd") ||
     window.__SHELLEY_INIT__?.default_cwd ||
+    "",
+);
+const workspaceCwd = computed(
+  () =>
+    workspaceDirectory.value ||
+    currentConversation.value?.cwd ||
+    mostRecentCwd.value ||
+    window.__SHELLEY_INIT__?.default_cwd ||
+    window.__SHELLEY_INIT__?.home_dir ||
     "",
 );
 
@@ -640,6 +667,25 @@ async function loadConversations() {
   }
 }
 
+async function loadOnboarding() {
+  onboardingLoading.value = true;
+  onboardingError.value = null;
+  try {
+    onboardingStatus.value = await api.getOnboarding();
+  } catch (cause) {
+    onboardingError.value =
+      cause instanceof Error ? cause.message : "Failed to load Shelley onboarding";
+  } finally {
+    onboardingLoading.value = false;
+  }
+}
+
+function handleOnboardingComplete(status: OnboardingStatus) {
+  onboardingStatus.value = status;
+  modelsRefreshTrigger.value++;
+  startNewConversation();
+}
+
 // ---- conversation actions ----
 function startNewConversation() {
   if (currentConversation.value?.cwd) {
@@ -653,6 +699,7 @@ function startNewConversation() {
 
 function startNewConversationWithCwd(cwd: string) {
   localStorage.setItem("shelley_selected_cwd", cwd);
+  workspaceDirectory.value = cwd;
   currentConversationId.value = null;
   viewedConversation.value = null;
   window.history.replaceState({}, "", "/new");
@@ -758,7 +805,13 @@ function openFileFinder() {
 // Finder selected a file: close it and open the generic editor on that path.
 function openFileInEditor(absPath: string) {
   fileFinderOpen.value = false;
-  editorFilePath.value = absPath;
+  workspaceOpenRequest.value = { path: absPath, nonce: Date.now() };
+}
+
+function changeWorkspaceDirectory(path: string) {
+  localStorage.setItem("shelley_selected_cwd", path);
+  workspaceDirectory.value = path;
+  startNewConversationWithCwd(path);
 }
 
 // A comment submitted from the file editor's comment mode: hand it to
@@ -937,6 +990,7 @@ watch(
 // ---- lifecycle ----
 onMounted(() => {
   initializeA11yTrace();
+  void loadOnboarding();
   // Hydrate persistent terminals from the server.
   let cancelled = false;
   fetch("/api/terminals")

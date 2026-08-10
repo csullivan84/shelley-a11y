@@ -38,6 +38,22 @@ export interface AvailableModel {
   supports_images?: boolean;
 }
 
+export interface ProviderCandidate {
+  id: string;
+  source: string;
+  provider: string;
+  label: string;
+  auth_type: string;
+  model_id?: string;
+}
+
+export interface OnboardingStatus {
+  complete: boolean;
+  candidates: ProviderCandidate[];
+  has_ready_models: boolean;
+  models: AvailableModel[];
+}
+
 class ApiService {
   private baseUrl = "/api";
 
@@ -79,6 +95,29 @@ class ApiService {
     });
     if (!response.ok) {
       throw await responseError(response, "Failed to refresh models");
+    }
+    return response.json();
+  }
+
+  async getOnboarding(): Promise<OnboardingStatus> {
+    const response = await fetch(`${this.baseUrl}/onboarding`);
+    if (!response.ok) {
+      throw await responseError(response, "Failed to load onboarding");
+    }
+    return response.json();
+  }
+
+  async completeOnboarding(request: {
+    candidate_ids: string[];
+    openrouter_api_key: string;
+  }): Promise<OnboardingStatus> {
+    const response = await fetch(`${this.baseUrl}/onboarding`, {
+      method: "POST",
+      headers: this.postHeaders,
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      throw await responseError(response, "Failed to configure providers");
     }
     return response.json();
   }
@@ -613,6 +652,7 @@ class ApiService {
     dir: string,
     query: string,
     signal?: AbortSignal,
+	limit?: number,
   ): Promise<{
     dir: string;
     query: string;
@@ -622,11 +662,31 @@ class ApiService {
   }> {
     const params = new URLSearchParams({ dir });
     if (query) params.set("q", query);
+	if (limit) params.set("limit", String(limit));
     const response = await fetch(`${this.baseUrl}/find-files?${params.toString()}`, { signal });
     if (!response.ok) {
       throw await responseError(response, "Failed to find files");
     }
     return response.json();
+  }
+
+  async readFile(path: string): Promise<{ path: string; content: string }> {
+    const response = await fetch(`${this.baseUrl}/read-file?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      throw await responseError(response, "Failed to read file");
+    }
+    return response.json();
+  }
+
+  async writeFile(path: string, content: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/write-file`, {
+      method: "POST",
+      headers: this.postHeaders,
+      body: JSON.stringify({ path, content }),
+    });
+    if (!response.ok) {
+      throw await responseError(response, "Failed to write file");
+    }
   }
 
   async renameConversation(conversationId: string, slug: string): Promise<Conversation> {
