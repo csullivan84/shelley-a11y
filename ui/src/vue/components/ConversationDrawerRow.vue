@@ -89,7 +89,8 @@
         </form>
       </div>
 
-      <!-- Preview / snippet -->
+      <!-- Search context is useful while searching, but normal rows stay
+           title-first so older conversation text does not fill the drawer. -->
       <div
         v-if="convState.search_snippet"
         class="conversation-preview conversation-snippet"
@@ -100,17 +101,6 @@
           <template v-else>{{ seg.text }}</template>
         </template>
       </div>
-      <div
-        v-else-if="isDraft"
-        class="conversation-preview"
-        :title="conversation.draft?.trim() || undefined"
-      >
-        {{ conversation.draft?.trim() || "\u00a0" }}
-      </div>
-      <div v-else class="conversation-preview" :title="convState.preview || undefined">
-        {{ convState.preview || "\u00a0" }}
-      </div>
-
       <div class="conversation-meta">
         <span class="conversation-date">{{ ctx.formatDate(conversation.updated_at) }}</span>
         <span
@@ -289,9 +279,6 @@
             class="working-indicator"
             :title="ctx.t('subagentIsWorking')"
           />
-        </div>
-        <div class="conversation-preview" :title="sub.preview || undefined">
-          {{ sub.preview || "\u00a0" }}
         </div>
         <div class="conversation-meta">
           <span class="conversation-date drawer-subagent-date">{{
