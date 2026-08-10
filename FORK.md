@@ -39,9 +39,9 @@ Codex OAuth is picked up automatically from the existing Codex CLI login. No env
 ```bash
 codex login  # once, via chatgpt.com — stores token in ~/.codex/auth.json
 make build
-./bin/shelley serve -port 8002 -db /tmp/vaxtui.db
+./bin/shelley --db /tmp/vaxtui.db serve -port 8002
 # default model becomes gpt-5.6-luna when no --default-model is set
-# override: ./bin/shelley serve --default-model gpt-5.6-luna
+# override: ./bin/shelley --db /tmp/vaxtui.db --default-model gpt-5.6-luna serve -port 8002
 ```
 
 Previous DeepSeek path (`DEEPSEEK_API_KEY` → `deepseek-v4-flash`) was removed in 76f9ac8 in favor of Codex OAuth. The Responses API base for Codex is `https://chatgpt.com/backend-api/codex` (no `/v1`).
