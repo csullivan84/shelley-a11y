@@ -1562,7 +1562,7 @@ func (s *Server) handleCancelConversation(w http.ResponseWriter, r *http.Request
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":               status,
+		"status":              status,
 		"cancelled_subagents": cancelledSubagents,
 	})
 }
@@ -2688,21 +2688,7 @@ func (s *Server) handleModelRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.refreshBuiltModels == nil {
-		http.Error(w, "model refresh is not configured", http.StatusNotImplemented)
-		return
-	}
-	refresher, ok := s.llmManager.(builtModelRefresher)
-	if !ok {
-		http.Error(w, "model manager does not support refresh", http.StatusInternalServerError)
-		return
-	}
-	builtModels, err := s.refreshBuiltModels(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := refresher.RefreshBuiltModels(builtModels); err != nil {
+	if err := s.refreshModelCatalog(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2710,6 +2696,21 @@ func (s *Server) handleModelRefresh(w http.ResponseWriter, r *http.Request) {
 	markDefaultModel(modelList, s.effectiveDefaultModel(modelList))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(modelList)
+}
+
+func (s *Server) refreshModelCatalog(ctx context.Context) error {
+	if s.refreshBuiltModels == nil {
+		return fmt.Errorf("model refresh is not configured")
+	}
+	refresher, ok := s.llmManager.(builtModelRefresher)
+	if !ok {
+		return fmt.Errorf("model manager does not support refresh")
+	}
+	builtModels, err := s.refreshBuiltModels(ctx)
+	if err != nil {
+		return err
+	}
+	return refresher.RefreshBuiltModels(builtModels)
 }
 
 // markDefaultModel sets IsDefault=true on the entry matching defaultID.
@@ -3291,8 +3292,9 @@ func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 
 	// Only allow known setting keys
 	allowedKeys := map[string]bool{
-		"auto_upgrade":      true,
-		exeNotifySettingKey: true,
+		"auto_upgrade":       true,
+		exeNotifySettingKey:  true,
+		onboardingSettingKey: true,
 	}
 	if !allowedKeys[req.Key] {
 		http.Error(w, fmt.Sprintf("Invalid setting key: %s", req.Key), http.StatusBadRequest)

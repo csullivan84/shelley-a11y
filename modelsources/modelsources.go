@@ -143,6 +143,21 @@ func OpenAICodex(accessToken, accountID string) Source {
 	}
 }
 
+// XAIOAuth returns xAI's Responses API authenticated with an OAuth access
+// token imported from a local client such as Hermes.
+func XAIOAuth(accessToken string) Source {
+	return Source{
+		label: "xAI OAuth",
+		providers: map[models.Provider]*providerConn{
+			models.ProviderXAI: {
+				baseURL: models.DefaultXAIBaseURL,
+				apiKey:  accessToken,
+				headers: http.Header{"User-Agent": []string{"Shelley"}},
+			},
+		},
+	}
+}
+
 // LLMIntegration returns a Source backed by one exe.dev "llm"
 // integration. idSuffix, when non-empty, is appended to each
 // materialized model ID to disambiguate multiple integrations.

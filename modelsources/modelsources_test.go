@@ -108,6 +108,27 @@ func TestOpenAICodexBuildsLuna(t *testing.T) {
 	}
 }
 
+func TestXAIOAuthBuildsGrok(t *testing.T) {
+	bs := Build(models.All(), []Source{XAIOAuth("token")}, &http.Client{}, nil)
+	b := findBuilt(bs, "grok-4.5")
+	if b == nil {
+		t.Fatal("grok-4.5 not built")
+	}
+	if b.Source != "xAI OAuth" {
+		t.Errorf("source = %q", b.Source)
+	}
+	responses, ok := b.Service.(*oai.ResponsesService)
+	if !ok {
+		t.Fatalf("service type = %T", b.Service)
+	}
+	if responses.APIKey != "token" {
+		t.Error("xAI OAuth token not configured")
+	}
+	if responses.ModelURL != models.DefaultXAIBaseURL+"/v1" {
+		t.Errorf("ModelURL = %q", responses.ModelURL)
+	}
+}
+
 func TestGatewaySourceLabels(t *testing.T) {
 	// Plain gateway.
 	bs := Build(models.All(), []Source{Gateway("https://gw.example.com", "", "", "")}, &http.Client{}, nil)

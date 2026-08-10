@@ -356,6 +356,8 @@ type Server struct {
 	defaultModel             string
 	requireHeader            string
 	refreshBuiltModels       func(context.Context) ([]models.Built, error)
+	providerAuthHome         string
+	providerAuthPath         string
 	conversationGroup        singleflight.Group[string, *ConversationManager]
 	versionChecker           *VersionChecker
 	notifDispatcher          *notifications.Dispatcher
@@ -460,6 +462,13 @@ func (s *Server) SetModelRefresher(refresh func(context.Context) ([]models.Built
 	s.refreshBuiltModels = refresh
 }
 
+// SetProviderOnboarding enables first-run credential discovery and import.
+// Empty paths select the current user's standard application directories.
+func (s *Server) SetProviderOnboarding(home, storePath string) {
+	s.providerAuthHome = home
+	s.providerAuthPath = storePath
+}
+
 // RegisterNotificationChannel adds a backend notification channel to the dispatcher.
 func (s *Server) RegisterNotificationChannel(ch notifications.Channel) {
 	s.notifDispatcher.Register(ch)
@@ -534,6 +543,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/notification-channel-types", http.HandlerFunc(s.handleNotificationChannelTypes))
 
 	// Models API (dynamic list refresh)
+	mux.Handle("GET /api/onboarding", compressionHandler(http.HandlerFunc(s.handleGetOnboarding)))
+	mux.Handle("POST /api/onboarding", compressionHandler(http.HandlerFunc(s.handleCompleteOnboarding)))
 	mux.Handle("POST /api/models/refresh", compressionHandler(http.HandlerFunc(s.handleModelRefresh)))
 	mux.Handle("/api/models", compressionHandler(http.HandlerFunc(s.handleModels)))
 	mux.Handle("/api/tools", http.HandlerFunc(s.handleTools))

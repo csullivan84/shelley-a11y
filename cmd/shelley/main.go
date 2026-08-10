@@ -19,6 +19,7 @@ import (
 	"shelley.exe.dev/llm/llmhttp"
 	"shelley.exe.dev/models"
 	"shelley.exe.dev/modelsources"
+	"shelley.exe.dev/providerauth"
 	"shelley.exe.dev/server"
 	_ "shelley.exe.dev/server/notifications/channels" // register channel types
 	"shelley.exe.dev/skills"
@@ -212,6 +213,7 @@ func runServe(global GlobalConfig, args []string) {
 	// Create server
 	svr := server.NewServer(database, llmManager, toolSetConfig, logger, global.PredictableOnly, llmConfig.DefaultModel, *requireHeader)
 	svr.SetModelRefresher(llmConfig.RefreshBuiltModels)
+	svr.SetProviderOnboarding("", "")
 	svr.Banner = *banner
 
 	// Load notification channels from DB.
@@ -438,23 +440,46 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (
 		exeenv.Configure(env)
 	}
 
-	defaultModel, sources, err := buildLLMModelSources(context.Background(), global, config, logger)
+	httpc := llmhttp.NewClient(nil)
+	build := func(ctx context.Context) (string, []models.Built, error) {
+		defaultModel, sources, err := buildLLMModelSources(ctx, global, config, logger)
+		if err != nil {
+			return "", nil, err
+		}
+		providerConfig, err := providerauth.Load("")
+		if err != nil {
+			return "", nil, fmt.Errorf("load imported provider credentials: %w", err)
+		}
+		for _, provider := range providerConfig.Providers {
+			switch provider.Kind {
+			case providerauth.KindOpenAICodex:
+				sources = append(sources, modelsources.OpenAICodex(provider.AccessToken, provider.AccountID))
+			case providerauth.KindXAIOAuth:
+				sources = append(sources, modelsources.XAIOAuth(provider.AccessToken))
+			}
+		}
+		built := modelsources.Build(models.All(), sources, httpc, logger)
+		built = append(built, providerauth.BuiltModels(providerConfig, httpc)...)
+		if defaultModel == "" {
+			defaultModel = providerauth.PreferredModel(providerConfig)
+		}
+		return defaultModel, built, nil
+	}
+	defaultModel, built, err := build(context.Background())
 	if err != nil {
 		return nil, err
 	}
-
-	httpc := llmhttp.NewClient(nil)
 	return &server.LLMConfig{
-		Models:       modelsources.Build(models.All(), sources, httpc, logger),
+		Models:       built,
 		DefaultModel: defaultModel,
 		DB:           database,
 		HTTPC:        httpc,
 		RefreshBuiltModels: func(ctx context.Context) ([]models.Built, error) {
-			_, sources, err := buildLLMModelSources(ctx, global, config, logger)
+			_, built, err := build(ctx)
 			if err != nil {
 				return nil, err
 			}
-			return modelsources.Build(models.All(), sources, httpc, logger), nil
+			return built, nil
 		},
 		Logger: logger,
 	}, nil
