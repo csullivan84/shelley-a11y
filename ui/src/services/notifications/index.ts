@@ -5,6 +5,7 @@ import { browserNotificationHandler } from "./handlers/browser";
 import { setChannelEnabled } from "./preferences";
 
 export { handleNotificationEvent } from "./handlers";
+export { sendTestBrowserNotification } from "./handlers/browser";
 export { getQuietHours, isChannelEnabled, setChannelEnabled, setQuietHours } from "./preferences";
 
 export function initializeNotifications(): void {

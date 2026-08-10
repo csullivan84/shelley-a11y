@@ -13035,20 +13035,33 @@ kbd {
   overflow: auto;
   max-height: calc(100vh - 220px);
 }
-.herds-member {
-  text-align: left;
+.herds-member-row {
   border: 1px solid var(--p-content-border-color, #e5e7eb);
   border-radius: 8px;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.herds-member-row.selected {
+  border-color: var(--p-primary-color, #2563eb);
+  box-shadow: 0 0 0 1px var(--p-primary-color, #2563eb);
+}
+.herds-member-select {
+  width: 100%;
+  text-align: left;
+  border: 0;
   padding: 0.55rem 0.65rem;
   background: transparent;
+  color: inherit;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
-.herds-member.selected {
-  border-color: var(--p-primary-color, #2563eb);
-  box-shadow: 0 0 0 1px var(--p-primary-color, #2563eb);
+.herds-member-select:hover,
+.herds-member-select:focus-visible {
+  background: var(--p-surface-100, #f3f4f6);
 }
 .herds-member-top {
   display: flex;
@@ -13080,6 +13093,7 @@ kbd {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+  padding: 0 0.65rem 0.55rem;
 }
 .herds-member-actions button {
   font-size: 0.8rem;

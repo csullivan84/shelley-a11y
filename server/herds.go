@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -18,17 +19,17 @@ import (
 // --- API types ---
 
 type herdAPI struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Notes          string          `json:"notes"`
-	DefaultCwd     string          `json:"default_cwd"`
-	DefaultCommand string          `json:"default_command"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Notes          string            `json:"notes"`
+	DefaultCwd     string            `json:"default_cwd"`
+	DefaultCommand string            `json:"default_command"`
 	DefaultEnv     map[string]string `json:"default_env"`
-	Lifecycle      string          `json:"lifecycle"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	Summary        herdSummaryAPI  `json:"summary"`
-	Members        []herdMemberAPI `json:"members,omitempty"`
+	Lifecycle      string            `json:"lifecycle"`
+	CreatedAt      string            `json:"created_at"`
+	UpdatedAt      string            `json:"updated_at"`
+	Summary        herdSummaryAPI    `json:"summary"`
+	Members        []herdMemberAPI   `json:"members,omitempty"`
 }
 
 type herdSummaryAPI struct {
@@ -41,23 +42,23 @@ type herdSummaryAPI struct {
 }
 
 type herdMemberAPI struct {
-	ID               string            `json:"id"`
-	HerdID           string            `json:"herd_id"`
-	TerminalID       *string           `json:"terminal_id"`
-	ConversationID   *string           `json:"conversation_id"`
-	ConversationSlug *string           `json:"conversation_slug,omitempty"`
-	Label            string            `json:"label"`
-	SortOrder        int64             `json:"sort_order"`
-	Recipe           recipeAPI         `json:"recipe"`
-	DesiredState     string            `json:"desired_state"`
-	ProcessState     string            `json:"process_state"` // running | closed | missing
-	AttentionState   string            `json:"attention_state"` // needs_user | working | quiet | unknown
-	Command          string            `json:"command"`
-	Cwd              string            `json:"cwd"`
-	AgeSeconds       *int64            `json:"age_seconds,omitempty"`
-	RecentOutput     string            `json:"recent_output,omitempty"`
-	CreatedAt        string            `json:"created_at"`
-	UpdatedAt        string            `json:"updated_at"`
+	ID               string    `json:"id"`
+	HerdID           string    `json:"herd_id"`
+	TerminalID       *string   `json:"terminal_id"`
+	ConversationID   *string   `json:"conversation_id"`
+	ConversationSlug *string   `json:"conversation_slug,omitempty"`
+	Label            string    `json:"label"`
+	SortOrder        int64     `json:"sort_order"`
+	Recipe           recipeAPI `json:"recipe"`
+	DesiredState     string    `json:"desired_state"`
+	ProcessState     string    `json:"process_state"`   // running | closed | missing
+	AttentionState   string    `json:"attention_state"` // needs_user | working | quiet | unknown
+	Command          string    `json:"command"`
+	Cwd              string    `json:"cwd"`
+	AgeSeconds       *int64    `json:"age_seconds,omitempty"`
+	RecentOutput     string    `json:"recent_output,omitempty"`
+	CreatedAt        string    `json:"created_at"`
+	UpdatedAt        string    `json:"updated_at"`
 }
 
 type recipeAPI struct {
@@ -114,10 +115,10 @@ type bulkResultAPI struct {
 }
 
 type bulkItemAPI struct {
-	MemberID string `json:"member_id"`
-	Label    string `json:"label"`
-	Outcome  string `json:"outcome"` // opened | closed | unchanged | failed
-	Error    string `json:"error,omitempty"`
+	MemberID   string  `json:"member_id"`
+	Label      string  `json:"label"`
+	Outcome    string  `json:"outcome"` // opened | closed | unchanged | failed
+	Error      string  `json:"error,omitempty"`
 	TerminalID *string `json:"terminal_id,omitempty"`
 }
 
@@ -206,6 +207,23 @@ func recipeValid(r recipeAPI) bool {
 	return strings.TrimSpace(r.Command) != ""
 }
 
+func (s *Server) conversationExists(ctx context.Context, conversationID *string) (bool, error) {
+	if conversationID == nil || *conversationID == "" {
+		return true, nil
+	}
+	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
+		_, err := q.GetConversation(ctx, *conversationID)
+		return err
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
 func envToSlice(m map[string]string) []string {
 	if len(m) == 0 {
 		return nil
@@ -238,6 +256,21 @@ func decodeJSON(r *http.Request, dst any) error {
 	return dec.Decode(dst)
 }
 
+func decodeCloseMode(r *http.Request) (bool, error) {
+	var req closeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		return false, err
+	}
+	switch req.Mode {
+	case "graceful":
+		return false, nil
+	case "force":
+		return true, nil
+	default:
+		return false, errors.New("mode must be graceful or force")
+	}
+}
+
 // --- Presentation ---
 
 func (s *Server) herdToAPI(ctx context.Context, h generated.Herd, withMembers bool) (herdAPI, error) {
@@ -252,7 +285,7 @@ func (s *Server) herdToAPI(ctx context.Context, h generated.Herd, withMembers bo
 		CreatedAt:      h.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      h.UpdatedAt.UTC().Format(time.RFC3339),
 	}
-	members, err := s.listMemberAPIs(ctx, h.ID)
+	members, err := s.listMemberAPIs(ctx, h.ID, withMembers)
 	if err != nil {
 		return api, err
 	}
@@ -285,7 +318,7 @@ func summarizeMembers(members []herdMemberAPI) herdSummaryAPI {
 	return sum
 }
 
-func (s *Server) listMemberAPIs(ctx context.Context, herdID string) ([]herdMemberAPI, error) {
+func (s *Server) listMemberAPIs(ctx context.Context, herdID string, includeOutput bool) ([]herdMemberAPI, error) {
 	var rows []generated.HerdMember
 	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
 		var err error
@@ -297,12 +330,16 @@ func (s *Server) listMemberAPIs(ctx context.Context, herdID string) ([]herdMembe
 	}
 	out := make([]herdMemberAPI, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, s.memberToAPI(ctx, row))
+		out = append(out, s.memberToAPIWithOutput(ctx, row, includeOutput))
 	}
 	return out, nil
 }
 
 func (s *Server) memberToAPI(ctx context.Context, m generated.HerdMember) herdMemberAPI {
+	return s.memberToAPIWithOutput(ctx, m, true)
+}
+
+func (s *Server) memberToAPIWithOutput(ctx context.Context, m generated.HerdMember, includeOutput bool) herdMemberAPI {
 	recipe := recipeFromJSON(m.Recipe)
 	api := herdMemberAPI{
 		ID:             m.ID,
@@ -332,7 +369,9 @@ func (s *Server) memberToAPI(ctx context.Context, m generated.HerdMember) herdMe
 				age = 0
 			}
 			api.AgeSeconds = &age
-			api.RecentOutput = recentTerminalOutput(sess.LogFile)
+			if includeOutput {
+				api.RecentOutput = recentTerminalOutput(sess.LogFile)
+			}
 		} else if m.DesiredState == "open" || m.TerminalID != nil {
 			// Expected a terminal but it is gone.
 			if m.DesiredState == "open" || (m.TerminalID != nil && *m.TerminalID != "") {
@@ -356,15 +395,11 @@ func (s *Server) memberToAPI(ctx context.Context, m generated.HerdMember) herdMe
 			if conv.AgentWorking {
 				api.AttentionState = "working"
 			} else {
-				// Idle linked conversation: waiting on the user for the next turn.
-				// Permission/approval systems would also map here.
 				api.AttentionState = "quiet"
-				// If the agent is not working but the user has not spoken after a
-				// turn, surface as needs_user only when the conversation has
-				// messages and is not a draft — still "quiet" for sort priority
-				// unless we have a stronger signal. Brief allows needs_user for
-				// waiting input; use quiet as default idle.
-				api.AttentionState = "quiet"
+				latest, latestErr := s.db.GetLatestActionableMessage(ctx, *m.ConversationID)
+				if latestErr == nil && latest != nil && isAgentEndOfTurn(latest) {
+					api.AttentionState = "needs_user"
+				}
 			}
 		} else {
 			api.AttentionState = "unknown"
@@ -378,13 +413,26 @@ func recentTerminalOutput(logFile string) string {
 	if logFile == "" {
 		return ""
 	}
-	data, err := os.ReadFile(logFile)
-	if err != nil || len(data) == 0 {
+	f, err := os.Open(logFile)
+	if err != nil {
 		return ""
 	}
-	// Take last ~400 bytes and last non-empty line-ish strip.
-	if len(data) > 400 {
-		data = data[len(data)-400:]
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	const tailBytes int64 = 4096
+	start := info.Size() - tailBytes
+	if start < 0 {
+		start = 0
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(f, tailBytes))
+	if err != nil || len(data) == 0 {
+		return ""
 	}
 	text := string(data)
 	// Strip most control characters except newline/tab.
@@ -688,6 +736,15 @@ func (s *Server) handleAddMember(w http.ResponseWriter, r *http.Request, herdID 
 		writeAPIError(w, http.StatusBadRequest, "bad_request", "invalid JSON body", nil)
 		return
 	}
+	conversationExists, err := s.conversationExists(ctx, req.ConversationID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "add_failed", err.Error(), map[string]any{"herd_id": herdID})
+		return
+	}
+	if !conversationExists {
+		writeAPIError(w, http.StatusUnprocessableEntity, "conversation_not_found", "linked conversation not found", nil)
+		return
+	}
 
 	if req.TerminalID != nil && *req.TerminalID != "" {
 		s.addLiveTerminalMember(w, r, h, req)
@@ -753,13 +810,21 @@ func (s *Server) addLiveTerminalMember(w http.ResponseWriter, r *http.Request, h
 
 	// Existing membership?
 	var existing *generated.HerdMember
-	_ = s.db.WithTx(ctx, func(q *generated.Queries) error {
+	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
 		m, err := q.GetHerdMemberByTerminal(ctx, &tid)
 		if err == nil {
 			existing = &m
+			return nil
 		}
-		return nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
 	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "add_failed", err.Error(), map[string]any{"herd_id": h.ID})
+		return
+	}
 	if existing != nil {
 		if existing.HerdID == h.ID {
 			writeJSON(w, http.StatusOK, s.memberToAPI(ctx, *existing))
@@ -767,10 +832,10 @@ func (s *Server) addLiveTerminalMember(w http.ResponseWriter, r *http.Request, h
 		}
 		if !req.ConfirmMove {
 			writeAPIError(w, http.StatusConflict, "terminal_in_other_herd", "terminal belongs to another herd; confirm move", map[string]any{
-				"terminal_id":   tid,
-				"current_herd":  existing.HerdID,
-				"target_herd":   h.ID,
-				"member_id":     existing.ID,
+				"terminal_id":  tid,
+				"current_herd": existing.HerdID,
+				"target_herd":  h.ID,
+				"member_id":    existing.ID,
 			})
 			return
 		}
@@ -785,10 +850,14 @@ func (s *Server) addLiveTerminalMember(w http.ResponseWriter, r *http.Request, h
 			if label == "" {
 				label = existing.Label
 			}
+			conversationID := existing.ConversationID
+			if req.ConversationID != nil {
+				conversationID = req.ConversationID
+			}
 			moved, err = q.UpdateHerdMember(ctx, generated.UpdateHerdMemberParams{
 				HerdID:         h.ID,
 				TerminalID:     existing.TerminalID,
-				ConversationID: existing.ConversationID,
+				ConversationID: conversationID,
 				Label:          label,
 				SortOrder:      maxSort + 1,
 				Recipe:         existing.Recipe,
@@ -927,6 +996,17 @@ func (s *Server) handlePatchMember(w http.ResponseWriter, r *http.Request, herdI
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "bad_request", "invalid JSON body", nil)
 		return
+	}
+	if !req.ClearConversation {
+		conversationExists, err := s.conversationExists(ctx, req.ConversationID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "patch_failed", err.Error(), map[string]any{"member_id": memberID})
+			return
+		}
+		if !conversationExists {
+			writeAPIError(w, http.StatusUnprocessableEntity, "conversation_not_found", "linked conversation not found", nil)
+			return
+		}
 	}
 	label := m.Label
 	if req.Label != nil {
@@ -1135,7 +1215,11 @@ func (s *Server) openMember(ctx context.Context, h generated.Herd, m generated.H
 	item := bulkItemAPI{MemberID: m.ID, Label: m.Label}
 	if m.TerminalID != nil && *m.TerminalID != "" && s.terminals.Alive(*m.TerminalID) {
 		// Ensure desired open
-		_ = s.setMemberDesired(ctx, m, m.TerminalID, "open")
+		if err := s.setMemberDesired(ctx, m, m.TerminalID, "open"); err != nil {
+			item.Outcome = "failed"
+			item.Error = "failed to record desired state: " + err.Error()
+			return item
+		}
 		item.Outcome = "unchanged"
 		item.TerminalID = m.TerminalID
 		return item
@@ -1222,9 +1306,11 @@ func (s *Server) handleMemberClose(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "member not found", map[string]any{"member_id": memberID})
 		return
 	}
-	var req closeRequest
-	_ = decodeJSON(r, &req)
-	force := strings.EqualFold(req.Mode, "force")
+	force, err := decodeCloseMode(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "bad_close_mode", err.Error(), map[string]any{"member_id": memberID})
+		return
+	}
 	item := s.closeMember(ctx, m, force)
 	if item.Outcome == "failed" {
 		writeAPIError(w, http.StatusInternalServerError, "close_failed", item.Error, map[string]any{
@@ -1243,6 +1329,10 @@ func (s *Server) handleMemberClose(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) closeMember(ctx context.Context, m generated.HerdMember, force bool) bulkItemAPI {
 	item := bulkItemAPI{MemberID: m.ID, Label: m.Label}
+	if m.TerminalID != nil && *m.TerminalID != "" {
+		tid := *m.TerminalID
+		item.TerminalID = &tid
+	}
 	recipe := recipeFromJSON(m.Recipe)
 	if m.TerminalID == nil || *m.TerminalID == "" || !s.terminals.Alive(*m.TerminalID) {
 		// Already closed / missing: clear terminal id, keep recipe.
@@ -1250,7 +1340,11 @@ func (s *Server) closeMember(ctx context.Context, m generated.HerdMember, force 
 			// Closing last live terminal without recipe is not allowed per brief
 			// when they are about to kill — but already dead: just clear.
 		}
-		_ = s.setMemberDesired(ctx, m, nil, "closed")
+		if err := s.setMemberDesired(ctx, m, nil, "closed"); err != nil {
+			item.Outcome = "failed"
+			item.Error = "failed to record desired state: " + err.Error()
+			return item
+		}
 		item.Outcome = "unchanged"
 		return item
 	}
@@ -1306,11 +1400,15 @@ func (s *Server) handleHerdOpenAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var members []generated.HerdMember
-	_ = s.db.WithTx(ctx, func(q *generated.Queries) error {
+	err = s.db.WithTx(ctx, func(q *generated.Queries) error {
 		var err error
 		members, err = q.ListHerdMembers(ctx, herdID)
 		return err
 	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "open_failed", err.Error(), map[string]any{"herd_id": herdID})
+		return
+	}
 	items := runBounded(members, herdConcurrency, func(m generated.HerdMember) bulkItemAPI {
 		return s.openMember(ctx, h, m)
 	})
@@ -1337,15 +1435,21 @@ func (s *Server) handleHerdCloseAll(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "herd_archived", "archived herds cannot close members", map[string]any{"herd_id": herdID})
 		return
 	}
-	var req closeRequest
-	_ = decodeJSON(r, &req)
-	force := strings.EqualFold(req.Mode, "force")
+	force, err := decodeCloseMode(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "bad_close_mode", err.Error(), map[string]any{"herd_id": herdID})
+		return
+	}
 	var members []generated.HerdMember
-	_ = s.db.WithTx(ctx, func(q *generated.Queries) error {
+	err = s.db.WithTx(ctx, func(q *generated.Queries) error {
 		var err error
 		members, err = q.ListHerdMembers(ctx, herdID)
 		return err
 	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "close_failed", err.Error(), map[string]any{"herd_id": herdID})
+		return
+	}
 	// Preflight attention for UI (returned in details of a 200 always; client confirms first).
 	items := runBounded(members, herdConcurrency, func(m generated.HerdMember) bulkItemAPI {
 		return s.closeMember(ctx, m, force)
@@ -1385,7 +1489,7 @@ func (s *Server) handleLooseTerminals(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	assigned := map[string]bool{}
-	_ = s.db.WithTx(ctx, func(q *generated.Queries) error {
+	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
 		rows, err := q.ListAllHerdMembers(ctx)
 		if err != nil {
 			return err
@@ -1397,6 +1501,10 @@ func (s *Server) handleLooseTerminals(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "list_loose_failed", err.Error(), nil)
+		return
+	}
 	type dto struct {
 		ID        string `json:"id"`
 		Command   string `json:"command"`
@@ -1426,7 +1534,15 @@ func (s *Server) handleHerdClosePreview(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx := r.Context()
 	herdID := r.PathValue("herd_id")
-	members, err := s.listMemberAPIs(ctx, herdID)
+	if _, err := s.loadHerd(ctx, herdID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAPIError(w, http.StatusNotFound, "not_found", "herd not found", map[string]any{"herd_id": herdID})
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "preview_failed", err.Error(), nil)
+		return
+	}
+	members, err := s.listMemberAPIs(ctx, herdID, false)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "preview_failed", err.Error(), nil)
 		return
@@ -1463,4 +1579,3 @@ func (s *Server) handleHerdClosePreview(w http.ResponseWriter, r *http.Request) 
 		"note":           "Closing terminals does not stop linked conversations.",
 	})
 }
-

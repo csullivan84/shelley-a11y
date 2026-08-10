@@ -128,15 +128,13 @@ func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extra
 			if err == nil {
 				return sess, dc, nil
 			}
-			// Stale record — forget and fall through to spawning a new one if
-			// the caller also gave us cmd.
+			// Reattachment is strict. A stale terminal ID must never restart its
+			// command implicitly; callers that want a new process use the explicit
+			// spawn path without term_id.
 			s.terminals.Forget(termID)
-			if cmd == "" {
-				return nil, nil, fmt.Errorf("terminal %s no longer running", termID)
-			}
-		} else if cmd == "" {
-			return nil, nil, fmt.Errorf("unknown terminal id %s", termID)
+			return nil, nil, fmt.Errorf("terminal %s no longer running", termID)
 		}
+		return nil, nil, fmt.Errorf("unknown terminal id %s", termID)
 	}
 	return s.terminals.Spawn(cmd, cwd, cols, rows, extraEnv)
 }

@@ -53,10 +53,12 @@
         <HerdsPage
           v-if="herdsRouteActive"
           :herd-id="herdsRouteId"
+          :conversations="topLevelConversations"
           @back="leaveHerds"
           @navigate-herd="navigateHerd"
           @open-conversation="openConversationFromHerd"
           @focus-terminal="focusTerminalFromHerd"
+          @terminals-closed="removeClosedTerminals"
         />
         <ChatInterface
           v-else
@@ -356,6 +358,14 @@ function focusTerminalFromHerd(term: { termId: string; command: string; cwd: str
       },
     ];
   });
+}
+
+const closedTerminalIds = new Set<string>();
+
+function removeClosedTerminals(termIds: string[]) {
+  for (const id of termIds) closedTerminalIds.add(id);
+  const closed = new Set(termIds);
+  setEphemeralTerminals((prev) => prev.filter((term) => !term.termId || !closed.has(term.termId)));
 }
 
 function updateUrlWithSlug(conversation: Conversation | undefined) {
@@ -936,7 +946,7 @@ onMounted(() => {
       setEphemeralTerminals((prev) => {
         const have = new Set(prev.map((tm) => tm.termId).filter(Boolean));
         const restored: EphemeralTerminal[] = rows
-          .filter((r) => !have.has(r.id))
+          .filter((r) => !have.has(r.id) && !closedTerminalIds.has(r.id))
           .map((r) => ({
             id: r.id,
             termId: r.id,

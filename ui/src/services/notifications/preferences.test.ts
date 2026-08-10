@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { getQuietHours, isQuietHours, setQuietHours } from "./preferences";
+import {
+  getQuietHours,
+  isChannelEnabled,
+  isQuietHours,
+  setChannelEnabled,
+  setQuietHours,
+} from "./preferences";
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -26,5 +32,14 @@ assert.equal(isQuietHours(at(12, 0)), false);
 setQuietHours({ enabled: true, start: "09:00", end: "17:00" });
 assert.equal(isQuietHours(at(10, 0)), true);
 assert.equal(isQuietHours(at(18, 0)), false);
+
+values.clear();
+Object.defineProperty(globalThis, "Notification", {
+  configurable: true,
+  value: { permission: "granted" },
+});
+assert.equal(isChannelEnabled("browser"), true);
+setChannelEnabled("browser", false);
+assert.equal(isChannelEnabled("browser"), false);
 
 console.log("notification preference tests passed");

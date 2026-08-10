@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"shelley.exe.dev/db"
+	"shelley.exe.dev/llm"
 )
 
 func TestHerdsCRUDAndMembership(t *testing.T) {
@@ -116,9 +117,9 @@ func TestHerdAttachMoveDetachCloseReopen(t *testing.T) {
 
 	// Move with confirm — same terminal id
 	addBody, _ = json.Marshal(map[string]any{
-		"terminal_id":   termID,
-		"label":         "agent",
-		"confirm_move":  true,
+		"terminal_id":  termID,
+		"label":        "agent",
+		"confirm_move": true,
 	})
 	req = httptest.NewRequest("POST", "/api/herds/"+h2+"/members", bytes.NewReader(addBody))
 	req.SetPathValue("herd_id", h2)
@@ -346,9 +347,9 @@ func TestHerdCloseAllDoesNotCancelConversations(t *testing.T) {
 	_ = dc.Close()
 	cid := conv.ConversationID
 	addBody, _ := json.Marshal(map[string]any{
-		"terminal_id":      sess.ID,
-		"label":            "agent",
-		"conversation_id":  cid,
+		"terminal_id":     sess.ID,
+		"label":           "agent",
+		"conversation_id": cid,
 	})
 	req := httptest.NewRequest("POST", "/api/herds/"+hID+"/members", bytes.NewReader(addBody))
 	req.SetPathValue("herd_id", hID)
@@ -390,6 +391,89 @@ func TestHerdCloseAllDoesNotCancelConversations(t *testing.T) {
 	}
 }
 
+func TestHerdAttentionNeedsUserAfterCompletedTurn(t *testing.T) {
+	srv, database, _ := newTestServer(t)
+	ctx := context.Background()
+	hID := createTestHerd(t, srv, "attention")
+	conv, err := database.CreateConversation(ctx, nil, true, nil, nil, db.ConversationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.CreateMessage(ctx, db.CreateMessageParams{
+		ConversationID: conv.ConversationID,
+		Type:           db.MessageTypeAgent,
+		LLMData: llm.Message{
+			Role:      llm.MessageRoleAssistant,
+			Content:   []llm.Content{{Type: llm.ContentTypeText, Text: "Finished."}},
+			EndOfTurn: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := addRecipeMember(t, srv, hID, "agent", recipeAPI{Command: "bash", Env: map[string]string{}})
+	body, _ := json.Marshal(map[string]any{"conversation_id": conv.ConversationID})
+	req := httptest.NewRequest("PATCH", "/api/herds/"+hID+"/members/"+m.ID, bytes.NewReader(body))
+	req.SetPathValue("herd_id", hID)
+	req.SetPathValue("member_id", m.ID)
+	w := httptest.NewRecorder()
+	srv.handlePatchMemberRoute(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("link conversation: %d %s", w.Code, w.Body.String())
+	}
+	var linked herdMemberAPI
+	if err := json.Unmarshal(w.Body.Bytes(), &linked); err != nil {
+		t.Fatal(err)
+	}
+	if linked.AttentionState != "needs_user" {
+		t.Fatalf("attention = %q, want needs_user", linked.AttentionState)
+	}
+}
+
+func TestHerdMemberRejectsMissingConversation(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	hID := createTestHerd(t, srv, "missing-conversation")
+	body, _ := json.Marshal(map[string]any{
+		"label":           "agent",
+		"conversation_id": "missing",
+		"recipe":          recipeAPI{Command: "bash", Env: map[string]string{}},
+	})
+	req := httptest.NewRequest("POST", "/api/herds/"+hID+"/members", bytes.NewReader(body))
+	req.SetPathValue("herd_id", hID)
+	w := httptest.NewRecorder()
+	srv.handleAddMemberRoute(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing conversation: got %d %s, want 422", w.Code, w.Body.String())
+	}
+}
+
+func TestHerdCloseRejectsInvalidMode(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	hID := createTestHerd(t, srv, "close-mode")
+	m := addRecipeMember(t, srv, hID, "shell", recipeAPI{Command: "bash", Env: map[string]string{}})
+	req := httptest.NewRequest("POST", "/api/herds/"+hID+"/members/"+m.ID+"/close", strings.NewReader(`{"mode":"sometimes"}`))
+	req.SetPathValue("herd_id", hID)
+	req.SetPathValue("member_id", m.ID)
+	w := httptest.NewRecorder()
+	srv.handleMemberClose(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("close mode: got %d %s, want 400", w.Code, w.Body.String())
+	}
+}
+
+func TestAttachOrSpawnDoesNotRestartUnknownTerminal(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	srv.terminals.SetSpawner(InProcessSpawner)
+	before := len(srv.terminals.List())
+	_, _, err := srv.attachOrSpawn("missing-terminal", "echo must-not-run", t.TempDir(), 80, 24, nil)
+	if err == nil {
+		t.Fatal("expected strict reattach error")
+	}
+	if after := len(srv.terminals.List()); after != before {
+		t.Fatalf("strict reattach spawned a terminal: before=%d after=%d", before, after)
+	}
+}
+
 func createTestHerd(t *testing.T, srv *Server, name string) string {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"name": name, "default_command": "bash"})
@@ -420,4 +504,3 @@ func addRecipeMember(t *testing.T, srv *Server, herdID, label string, recipe rec
 	_ = json.Unmarshal(w.Body.Bytes(), &m)
 	return m
 }
-

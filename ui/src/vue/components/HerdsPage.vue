@@ -20,7 +20,12 @@
       </div>
       <div class="herds-page-header-actions">
         <template v-if="!detail">
-          <Button label="New herd" @click="showCreate = true" />
+          <Button
+            :label="showArchived ? 'Active herds' : 'Archived herds'"
+            severity="secondary"
+            @click="toggleArchived"
+          />
+          <Button v-if="!showArchived" label="New herd" @click="beginCreateHerd" />
         </template>
         <template v-else>
           <Button
@@ -45,6 +50,13 @@
             severity="secondary"
             :disabled="detail.lifecycle !== 'active'"
             @click="createNewTerminalMember"
+          />
+          <Button
+            v-if="detail.lifecycle === 'active'"
+            label="Rename"
+            text
+            severity="secondary"
+            @click="beginRename"
           />
           <Button
             v-if="detail.lifecycle === 'active'"
@@ -73,11 +85,18 @@
 
     <!-- List -->
     <div v-if="!detail" class="herds-list">
-      <p v-if="!loading && herds.length === 0" class="herds-empty">
-        No herds yet. Create a herd for the work in front of you.
+      <p v-if="!loading && visibleHerds.length === 0" class="herds-empty">
+        {{
+          showArchived
+            ? "No archived herds."
+            : "No herds yet. Create a herd for the work in front of you."
+        }}
       </p>
-      <div v-if="!loading && herds.length === 0" class="herds-empty-actions">
-        <Button label="Create herd" @click="showCreate = true" />
+      <div
+        v-if="!loading && visibleHerds.length === 0 && !showArchived"
+        class="herds-empty-actions"
+      >
+        <Button label="Create herd" @click="beginCreateHerd" />
         <Button
           label="Create herd from open terminals"
           severity="secondary"
@@ -85,26 +104,48 @@
         />
       </div>
       <ul v-else class="herds-list-ul" aria-label="Herds">
-        <li v-for="h in herds" :key="h.id" class="herds-list-item">
-          <a
-            class="herds-list-link"
-            :href="`/herds/${h.id}`"
-            :aria-label="`${h.name}, ${summaryText(h.summary)}`"
-            @click.prevent="openHerd(h.id)"
-          >
+        <li v-for="h in visibleHerds" :key="h.id" class="herds-list-item">
+          <a class="herds-list-link" :href="`/herds/${h.id}`" @click.prevent="openHerd(h.id)">
             <span class="herds-list-name">{{ h.name }}</span>
             <span class="herds-list-summary">{{ summaryText(h.summary) }}</span>
             <span v-if="h.default_cwd" class="herds-list-cwd">{{ h.default_cwd }}</span>
           </a>
           <div class="herds-list-actions">
-            <button type="button" class="btn-icon-sm" :aria-label="`Open all in ${h.name}`" @click="openAllHerd(h.id)">
+            <button
+              v-if="h.lifecycle === 'active'"
+              type="button"
+              class="btn-icon-sm"
+              :aria-label="`Open all in ${h.name}`"
+              @click="openAllHerd(h.id)"
+            >
               Open all
             </button>
-            <button type="button" class="btn-icon-sm" :aria-label="`Close all in ${h.name}`" @click="beginCloseAllHerd(h.id)">
+            <button
+              v-if="h.lifecycle === 'active'"
+              type="button"
+              class="btn-icon-sm"
+              :aria-label="`Close all in ${h.name}`"
+              @click="beginCloseAllHerd(h.id)"
+            >
               Close all
             </button>
-            <button type="button" class="btn-icon-sm" :aria-label="`Archive ${h.name}`" @click="archiveHerd(h.id)">
+            <button
+              v-if="h.lifecycle === 'active'"
+              type="button"
+              class="btn-icon-sm"
+              :aria-label="`Archive ${h.name}`"
+              @click="archiveHerd(h.id)"
+            >
               Archive
+            </button>
+            <button
+              v-else
+              type="button"
+              class="btn-icon-sm"
+              :aria-label="`Restore ${h.name}`"
+              @click="restoreHerd(h.id)"
+            >
+              Restore
             </button>
           </div>
         </li>
@@ -128,45 +169,60 @@
       </div>
 
       <div class="herds-detail-body">
-        <div class="herds-members" role="listbox" aria-label="Herd members" tabindex="0">
+        <div class="herds-members" role="list" aria-label="Herd members" tabindex="0">
           <p v-if="filteredMembers.length === 0" class="herds-empty">
             No members yet. Add an open terminal or create one for this herd.
           </p>
-          <button
+          <div
             v-for="m in filteredMembers"
             :key="m.id"
-            type="button"
-            role="option"
-            :aria-selected="selectedMemberId === m.id"
-            :class="['herds-member', { selected: selectedMemberId === m.id }]"
-            @click="selectMember(m)"
+            role="listitem"
+            :class="['herds-member-row', { selected: selectedMemberId === m.id }]"
           >
-            <div class="herds-member-top">
-              <span class="herds-member-label">{{ m.label }}</span>
-              <span class="herds-member-state">{{ m.process_state }} · {{ m.attention_state }}</span>
-            </div>
-            <div class="herds-member-meta">
-              <span>{{ m.command || m.recipe.command || "—" }}</span>
-              <span v-if="m.cwd || m.recipe.cwd">{{ m.cwd || m.recipe.cwd }}</span>
-            </div>
-            <div v-if="m.recent_output" class="herds-member-output">{{ m.recent_output }}</div>
-            <div class="herds-member-actions" @click.stop>
+            <button
+              type="button"
+              class="herds-member-select"
+              :aria-pressed="selectedMemberId === m.id"
+              @click="selectMember(m)"
+            >
+              <span class="herds-member-top">
+                <span class="herds-member-label">{{ m.label }}</span>
+                <span class="herds-member-state"
+                  >{{ m.process_state }} · {{ m.attention_state }}</span
+                >
+              </span>
+              <span class="herds-member-meta">
+                <span>{{ m.command || m.recipe.command || "—" }}</span>
+                <span v-if="m.cwd || m.recipe.cwd">{{ m.cwd || m.recipe.cwd }}</span>
+              </span>
+              <span v-if="m.recent_output" class="herds-member-output">{{ m.recent_output }}</span>
+            </button>
+            <div class="herds-member-actions">
               <template v-if="m.process_state === 'running'">
                 <button type="button" @click="focusMember(m)">Focus</button>
-                <button type="button" @click="detachMember(m)">Detach</button>
-                <button type="button" @click="closeMember(m)">Close</button>
+                <template v-if="detail.lifecycle === 'active'">
+                  <button type="button" @click="detachMember(m)">Detach</button>
+                  <button type="button" @click="closeMember(m)">Close</button>
+                </template>
               </template>
-              <template v-else-if="m.process_state === 'closed'">
+              <template v-else-if="m.process_state === 'closed' && detail.lifecycle === 'active'">
                 <button type="button" @click="openMember(m)">Open</button>
                 <button type="button" @click="removeMember(m)">Remove</button>
               </template>
-              <template v-else>
+              <template v-else-if="m.process_state === 'missing' && detail.lifecycle === 'active'">
                 <button type="button" @click="openMember(m)">Respawn</button>
                 <button type="button" @click="repairMember(m)">Repair recipe</button>
                 <button type="button" @click="removeMember(m)">Remove</button>
               </template>
+              <button
+                v-if="detail.lifecycle === 'active'"
+                type="button"
+                @click="beginLinkConversation(m)"
+              >
+                {{ m.conversation_id ? "Change conversation" : "Link conversation" }}
+              </button>
             </div>
-          </button>
+          </div>
         </div>
 
         <div class="herds-focus-pane">
@@ -191,10 +247,15 @@
                 :href="convHref(selectedMember)"
                 @click.prevent="emit('open-conversation', selectedMember.conversation_id!)"
               >
-                Open conversation{{ selectedMember.conversation_slug ? ` (${selectedMember.conversation_slug})` : "" }}
+                Open conversation{{
+                  selectedMember.conversation_slug ? ` (${selectedMember.conversation_slug})` : ""
+                }}
               </a>
             </div>
-            <div v-if="focusedTermId && selectedMember.terminal_id === focusedTermId" class="herds-xterm-host">
+            <div
+              v-if="focusedTermId && selectedMember.terminal_id === focusedTermId"
+              class="herds-xterm-host"
+            >
               <TerminalInstance
                 :key="focusedTermId"
                 :term="{
@@ -219,7 +280,14 @@
     </div>
 
     <!-- Create herd modal -->
-    <Modal :is-open="showCreate" title="New herd" @close="showCreate = false">
+    <Modal
+      :is-open="showCreate"
+      :title="createFromLoosePending ? 'New herd from open terminals' : 'New herd'"
+      @close="cancelCreateHerd"
+    >
+      <p v-if="createFromLoosePending">
+        Name the herd that will receive every currently loose terminal.
+      </p>
       <label class="herds-field">
         Name
         <input v-model="createName" type="text" class="herds-input" @keydown.enter="createHerd" />
@@ -233,13 +301,26 @@
         <input v-model="createCmd" type="text" class="herds-input" />
       </label>
       <template #footer>
-        <Button label="Cancel" text severity="secondary" @click="showCreate = false" />
+        <Button label="Cancel" text severity="secondary" @click="cancelCreateHerd" />
         <Button label="Create" @click="createHerd" />
       </template>
     </Modal>
 
     <!-- Attach existing -->
     <Modal :is-open="showAttach" title="Add existing terminal" @close="showAttach = false">
+      <label class="herds-field">
+        Linked conversation
+        <select v-model="attachConversationId" class="herds-input">
+          <option value="">None</option>
+          <option
+            v-for="conversation in conversations"
+            :key="conversation.conversation_id"
+            :value="conversation.conversation_id"
+          >
+            {{ conversationLabel(conversation) }}
+          </option>
+        </select>
+      </label>
       <p v-if="looseTerminals.length === 0" class="herds-empty">No loose terminals.</p>
       <ul v-else class="herds-loose-list">
         <li v-for="t in looseTerminals" :key="t.id">
@@ -274,8 +355,16 @@
     </Modal>
 
     <!-- Close one member -->
-    <Modal :is-open="!!pendingCloseMember" title="Close terminal" @close="pendingCloseMember = null">
+    <Modal
+      :is-open="!!pendingCloseMember"
+      title="Close terminal"
+      @close="pendingCloseMember = null"
+    >
       <p>Close terminal for {{ pendingCloseMember?.label }}?</p>
+      <p v-if="pendingCloseMember?.conversation_id">
+        Its linked conversation is {{ pendingCloseMember.attention_state }} and will continue after
+        the PTY closes.
+      </p>
       <template #footer>
         <Button label="Cancel" text severity="secondary" @click="pendingCloseMember = null" />
         <Button label="Close" severity="danger" @click="confirmCloseMember" />
@@ -306,6 +395,37 @@
       <template #footer>
         <Button label="Cancel" text severity="secondary" @click="repairTarget = null" />
         <Button label="Save recipe" @click="saveRepair" />
+      </template>
+    </Modal>
+
+    <Modal :is-open="showRename" title="Rename herd" @close="showRename = false">
+      <label class="herds-field">
+        Name
+        <input v-model="renameValue" type="text" class="herds-input" @keydown.enter="saveRename" />
+      </label>
+      <template #footer>
+        <Button label="Cancel" text severity="secondary" @click="showRename = false" />
+        <Button label="Rename" @click="saveRename" />
+      </template>
+    </Modal>
+
+    <Modal :is-open="!!linkTarget" title="Link conversation" @close="linkTarget = null">
+      <label class="herds-field">
+        Conversation
+        <select v-model="linkConversationId" class="herds-input">
+          <option value="">None</option>
+          <option
+            v-for="conversation in conversations"
+            :key="conversation.conversation_id"
+            :value="conversation.conversation_id"
+          >
+            {{ conversationLabel(conversation) }}
+          </option>
+        </select>
+      </label>
+      <template #footer>
+        <Button label="Cancel" text severity="secondary" @click="linkTarget = null" />
+        <Button label="Save link" @click="saveConversationLink" />
       </template>
     </Modal>
   </div>
@@ -355,6 +475,11 @@ export interface HerdMember {
   recent_output?: string;
 }
 
+interface ConversationOption {
+  conversation_id: string;
+  slug?: string | null;
+}
+
 interface LooseTerminal {
   id: string;
   command: string;
@@ -364,6 +489,7 @@ interface LooseTerminal {
 
 const props = defineProps<{
   herdId: string | null;
+  conversations: ConversationOption[];
 }>();
 
 const emit = defineEmits<{
@@ -371,6 +497,7 @@ const emit = defineEmits<{
   (e: "navigate-herd", id: string | null): void;
   (e: "open-conversation", id: string): void;
   (e: "focus-terminal", term: { termId: string; command: string; cwd: string }): void;
+  (e: "terminals-closed", ids: string[]): void;
 }>();
 
 const herds = ref<Herd[]>([]);
@@ -384,7 +511,15 @@ const filter = ref<"all" | "needs_you" | "working" | "quiet" | "closed">("all");
 const selectedMemberId = ref<string | null>(null);
 const focusedTermId = ref<string | null>(null);
 const showCreate = ref(false);
+const createFromLoosePending = ref(false);
+const pendingLooseTerminals = ref<LooseTerminal[]>([]);
 const showAttach = ref(false);
+const attachConversationId = ref("");
+const showArchived = ref(false);
+const showRename = ref(false);
+const renameValue = ref("");
+const linkTarget = ref<HerdMember | null>(null);
+const linkConversationId = ref("");
 const createName = ref("");
 const createCwd = ref("");
 const createCmd = ref("bash");
@@ -392,7 +527,12 @@ const looseTerminals = ref<LooseTerminal[]>([]);
 const closeConfirm = ref<{
   herdId: string;
   live: number;
-  warnings: Array<{ member_id: string; label: string; attention_state: string; conversation_slug?: string }>;
+  warnings: Array<{
+    member_id: string;
+    label: string;
+    attention_state: string;
+    conversation_slug?: string;
+  }>;
 } | null>(null);
 const repairTarget = ref<HerdMember | null>(null);
 const repairCmd = ref("");
@@ -406,7 +546,14 @@ const filters = [
   { id: "closed" as const, label: "Closed" },
 ];
 
-const globalNeedsUser = computed(() => herds.value.reduce((n, h) => n + (h.summary?.needs_user || 0), 0));
+const globalNeedsUser = computed(() =>
+  herds.value
+    .filter((herd) => herd.lifecycle === "active")
+    .reduce((count, herd) => count + (herd.summary?.needs_user || 0), 0),
+);
+const visibleHerds = computed(() =>
+  herds.value.filter((herd) => herd.lifecycle === (showArchived.value ? "archived" : "active")),
+);
 
 const selectedMember = computed(
   () => detail.value?.members?.find((m) => m.id === selectedMemberId.value) ?? null,
@@ -469,7 +616,9 @@ async function loadList() {
   loading.value = true;
   error.value = null;
   try {
-    herds.value = await apiJSON<Herd[]>("/api/herds");
+    herds.value = await apiJSON<Herd[]>(
+      showArchived.value ? "/api/herds?archived=1" : "/api/herds",
+    );
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -491,6 +640,9 @@ async function loadDetail(id: string) {
     if (pick) {
       selectedMemberId.value = pick.id;
       liveAnnouncement.value = `${pick.label}, ${pick.process_state}, ${pick.attention_state}`;
+    } else {
+      selectedMemberId.value = null;
+      focusedTermId.value = null;
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -515,6 +667,28 @@ function openHerd(id: string) {
   emit("navigate-herd", id);
 }
 
+function conversationLabel(conversation: ConversationOption): string {
+  return conversation.slug || conversation.conversation_id;
+}
+
+function beginCreateHerd() {
+  createFromLoosePending.value = false;
+  pendingLooseTerminals.value = [];
+  createName.value = "";
+  showCreate.value = true;
+}
+
+function cancelCreateHerd() {
+  showCreate.value = false;
+  createFromLoosePending.value = false;
+  pendingLooseTerminals.value = [];
+}
+
+async function toggleArchived() {
+  showArchived.value = !showArchived.value;
+  await loadList();
+}
+
 async function createHerd() {
   const name = createName.value.trim();
   if (!name) return;
@@ -527,34 +701,44 @@ async function createHerd() {
         default_command: createCmd.value.trim() || "bash",
       }),
     });
+    let attachFailures = 0;
+    if (createFromLoosePending.value) {
+      for (const terminal of pendingLooseTerminals.value) {
+        try {
+          await apiJSON(`/api/herds/${h.id}/members`, {
+            method: "POST",
+            body: JSON.stringify({ terminal_id: terminal.id, label: terminal.command }),
+          });
+        } catch {
+          attachFailures++;
+        }
+      }
+    }
     showCreate.value = false;
+    createFromLoosePending.value = false;
+    pendingLooseTerminals.value = [];
     createName.value = "";
     emit("navigate-herd", h.id);
+    if (attachFailures > 0) {
+      error.value = `${attachFailures} terminal${attachFailures === 1 ? "" : "s"} could not be attached.`;
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
 }
 
 async function createFromLoose() {
-  showCreate.value = true;
-  createName.value = "pack";
-  await nextTick();
-  // After create user can attach; also auto-create and attach all loose.
   try {
     const loose = await apiJSON<LooseTerminal[]>("/api/terminals/loose");
-    if (loose.length === 0) return;
-    const h = await apiJSON<Herd>("/api/herds", {
-      method: "POST",
-      body: JSON.stringify({ name: `pack-${Date.now().toString(36)}`, default_command: "bash" }),
-    });
-    for (const t of loose) {
-      await apiJSON(`/api/herds/${h.id}/members`, {
-        method: "POST",
-        body: JSON.stringify({ terminal_id: t.id, label: t.command }),
-      });
+    if (loose.length === 0) {
+      liveAnnouncement.value = "No loose terminals.";
+      return;
     }
-    showCreate.value = false;
-    emit("navigate-herd", h.id);
+    pendingLooseTerminals.value = loose;
+    createFromLoosePending.value = true;
+    createName.value = "pack";
+    showCreate.value = true;
+    await nextTick();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -574,8 +758,73 @@ async function setLifecycle(lifecycle: string) {
 
 async function archiveHerd(id: string) {
   try {
-    await apiJSON(`/api/herds/${id}`, { method: "PATCH", body: JSON.stringify({ lifecycle: "archived" }) });
+    await apiJSON(`/api/herds/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ lifecycle: "archived" }),
+    });
     await loadList();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function restoreHerd(id: string) {
+  try {
+    await apiJSON(`/api/herds/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ lifecycle: "active" }),
+    });
+    await loadList();
+    liveAnnouncement.value = "Herd restored.";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function beginRename() {
+  if (!detail.value) return;
+  renameValue.value = detail.value.name;
+  showRename.value = true;
+}
+
+async function saveRename() {
+  if (!detail.value || !renameValue.value.trim()) return;
+  try {
+    detail.value = await apiJSON<Herd>(`/api/herds/${detail.value.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: renameValue.value.trim() }),
+    });
+    showRename.value = false;
+    liveAnnouncement.value = `Renamed herd to ${detail.value.name}`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function beginLinkConversation(member: HerdMember) {
+  linkTarget.value = member;
+  linkConversationId.value = member.conversation_id || "";
+}
+
+async function saveConversationLink() {
+  if (!detail.value || !linkTarget.value) return;
+  try {
+    const body = linkConversationId.value
+      ? { conversation_id: linkConversationId.value }
+      : { clear_conversation: true };
+    await apiJSON(`/api/herds/${detail.value.id}/members/${linkTarget.value.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    const label = linkTarget.value.label;
+    const linkedConversation = props.conversations.find(
+      (conversation) => conversation.conversation_id === linkConversationId.value,
+    );
+    linkTarget.value = null;
+    await loadDetail(detail.value.id);
+    liveAnnouncement.value = linkConversationId.value
+      ? `Linked ${label} to ${linkedConversation ? conversationLabel(linkedConversation) : linkConversationId.value}`
+      : `Unlinked conversation from ${label}`;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -628,6 +877,7 @@ async function confirmCloseMember() {
       method: "POST",
       body: JSON.stringify({ mode: "graceful" }),
     });
+    if (m.terminal_id) emit("terminals-closed", [m.terminal_id]);
     focusedTermId.value = null;
     await loadDetail(detail.value.id);
     liveAnnouncement.value = `Closed ${m.label}`;
@@ -671,7 +921,11 @@ async function saveRepair() {
     await apiJSON(`/api/herds/${detail.value.id}/members/${repairTarget.value.id}`, {
       method: "PATCH",
       body: JSON.stringify({
-        recipe: { command: repairCmd.value, cwd: repairCwd.value, env: repairTarget.value.recipe.env || {} },
+        recipe: {
+          command: repairCmd.value,
+          cwd: repairCwd.value,
+          env: repairTarget.value.recipe.env || {},
+        },
       }),
     });
     repairTarget.value = null;
@@ -713,14 +967,23 @@ async function attachLoose(t: LooseTerminal) {
   try {
     await apiJSON(`/api/herds/${detail.value.id}/members`, {
       method: "POST",
-      body: JSON.stringify({ terminal_id: t.id, label: t.command }),
+      body: JSON.stringify({
+        terminal_id: t.id,
+        label: t.command,
+        ...(attachConversationId.value ? { conversation_id: attachConversationId.value } : {}),
+      }),
     });
     showAttach.value = false;
+    attachConversationId.value = "";
     await loadDetail(detail.value.id);
     liveAnnouncement.value = `Attached ${t.command}`;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("another herd") || msg.includes("confirm") || msg.includes("belongs to another")) {
+    if (
+      msg.includes("another herd") ||
+      msg.includes("confirm") ||
+      msg.includes("belongs to another")
+    ) {
       pendingMove.value = t;
       return;
     }
@@ -737,9 +1000,15 @@ async function confirmMove() {
   try {
     await apiJSON(`/api/herds/${detail.value.id}/members`, {
       method: "POST",
-      body: JSON.stringify({ terminal_id: t.id, label: t.command, confirm_move: true }),
+      body: JSON.stringify({
+        terminal_id: t.id,
+        label: t.command,
+        confirm_move: true,
+        ...(attachConversationId.value ? { conversation_id: attachConversationId.value } : {}),
+      }),
     });
     showAttach.value = false;
+    attachConversationId.value = "";
     await loadDetail(detail.value.id);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -757,10 +1026,9 @@ async function openAllHerd(id: string) {
   bulkResultText.value = "";
   try {
     liveAnnouncement.value = "Opening herd…";
-    const result = await apiJSON<{ items: Array<{ label: string; outcome: string; error?: string }> }>(
-      `/api/herds/${id}/open`,
-      { method: "POST" },
-    );
+    const result = await apiJSON<{
+      items: Array<{ label: string; outcome: string; error?: string }>;
+    }>(`/api/herds/${id}/open`, { method: "POST" });
     const counts = { opened: 0, unchanged: 0, failed: 0, closed: 0 };
     for (const it of result.items) {
       if (it.outcome in counts) (counts as Record<string, number>)[it.outcome]++;
@@ -787,9 +1055,18 @@ async function beginCloseAllHerd(id: string) {
   try {
     const preview = await apiJSON<{
       live_terminals: number;
-      warnings: Array<{ member_id: string; label: string; attention_state: string; conversation_slug?: string }>;
+      warnings: Array<{
+        member_id: string;
+        label: string;
+        attention_state: string;
+        conversation_slug?: string;
+      }>;
     }>(`/api/herds/${id}/close-preview`);
-    closeConfirm.value = { herdId: id, live: preview.live_terminals, warnings: preview.warnings || [] };
+    closeConfirm.value = {
+      herdId: id,
+      live: preview.live_terminals,
+      warnings: preview.warnings || [],
+    };
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -801,13 +1078,16 @@ async function confirmCloseAll() {
   closeConfirm.value = null;
   bulkBusy.value = true;
   try {
-    const result = await apiJSON<{ items: Array<{ outcome: string; label: string; error?: string }> }>(
-      `/api/herds/${id}/close`,
-      { method: "POST", body: JSON.stringify({ mode: "graceful" }) },
-    );
+    const result = await apiJSON<{
+      items: Array<{ outcome: string; label: string; error?: string; terminal_id?: string }>;
+    }>(`/api/herds/${id}/close`, { method: "POST", body: JSON.stringify({ mode: "graceful" }) });
     const closed = result.items.filter((i) => i.outcome === "closed").length;
     const failed = result.items.filter((i) => i.outcome === "failed").length;
     const unchanged = result.items.filter((i) => i.outcome === "unchanged").length;
+    const closedTerminalIds = result.items
+      .filter((i) => i.outcome === "closed" || i.outcome === "unchanged")
+      .flatMap((i) => (i.terminal_id ? [i.terminal_id] : []));
+    if (closedTerminalIds.length > 0) emit("terminals-closed", closedTerminalIds);
     bulkResultText.value = `Closed ${closed}, unchanged ${unchanged}, failed ${failed}`;
     liveAnnouncement.value = bulkResultText.value;
     focusedTermId.value = null;

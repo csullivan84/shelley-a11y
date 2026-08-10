@@ -115,6 +115,13 @@
             :label="browserEnabled ? t('on') : t('off')"
             @click="toggleBrowser"
           />
+          <Button
+            v-if="browserPermission === 'granted' && browserEnabled"
+            size="small"
+            severity="secondary"
+            label="Test"
+            @click="testBrowser"
+          />
           <span v-if="browserPermission === 'denied'" class="notifications-denied-text">
             {{ t("denied") }}
           </span>
@@ -237,6 +244,7 @@ import {
   setChannelEnabled,
   getQuietHours,
   setQuietHours,
+  sendTestBrowserNotification,
 } from "../../services/notifications";
 import { announceA11y } from "../../services/a11yAnnouncer";
 
@@ -464,6 +472,14 @@ function toggleBrowser() {
   const newVal = !browserEnabled.value;
   setChannelEnabled("browser", newVal);
   browserEnabled.value = newVal;
+}
+
+function testBrowser() {
+  if (sendTestBrowserNotification()) {
+    announceA11y("Test browser notification sent.");
+  } else {
+    error.value = "Browser notification permission is not granted.";
+  }
 }
 
 function toggleFavicon() {

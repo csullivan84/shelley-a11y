@@ -16,23 +16,35 @@ export interface NotificationPreferences {
   };
 }
 
-const DEFAULT_PREFS: NotificationPreferences = {
-  channels: {
-    favicon: { enabled: true },
-    browser: { enabled: false },
-  },
-};
+function defaultPreferences(): NotificationPreferences {
+  const browserGranted =
+    typeof Notification !== "undefined" && Notification.permission === "granted";
+  return {
+    channels: {
+      favicon: { enabled: true },
+      browser: { enabled: browserGranted },
+    },
+  };
+}
 
 export function getNotificationPreferences(): NotificationPreferences {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored) as NotificationPreferences;
+      const defaults = defaultPreferences();
+      return {
+        ...parsed,
+        channels: {
+          ...defaults.channels,
+          ...(parsed.channels || {}),
+        },
+      };
     } catch {
-      return DEFAULT_PREFS;
+      return defaultPreferences();
     }
   }
-  return DEFAULT_PREFS;
+  return defaultPreferences();
 }
 
 export function setNotificationPreferences(prefs: NotificationPreferences): void {

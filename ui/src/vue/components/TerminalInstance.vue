@@ -18,11 +18,7 @@
       backgroundColor: isDark ? '#1a1b26' : '#f8f9fa',
     }"
   >
-    <div
-      ref="containerRef"
-      class="terminal-instance-xterm"
-      aria-label="Terminal shell input"
-    />
+    <div ref="containerRef" class="terminal-instance-xterm" aria-label="Terminal shell input" />
     <!-- Plain text mirror of the buffer: navigable with VO left/right and Tab. -->
     <pre
       ref="outputLogRef"
@@ -33,7 +29,8 @@
       aria-atomic="false"
       aria-label="Terminal output (read-only). Tab returns to shell input; Escape leaves the terminal."
       @keydown="onOutputLogKeydown"
-    >{{ bufferText || "(no output yet)" }}</pre>
+      >{{ bufferText || "(no output yet)" }}</pre
+    >
   </div>
 </template>
 
@@ -280,14 +277,16 @@ onMounted(() => {
   scheduleMirrorRefresh(xterm);
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  // If we already have a persistent session id, reattach to it. Otherwise
-  // spawn a new one by sending cmd+cwd.
+  // Reattach and spawn are deliberately separate. Sending a command with a
+  // persistent session id would let a stale tab resurrect a terminal that the
+  // user explicitly closed.
   const params = new URLSearchParams();
   if (props.term.termId) {
     params.set("term_id", props.term.termId);
+  } else {
+    params.set("cmd", props.term.command);
+    params.set("cwd", props.term.cwd);
   }
-  params.set("cmd", props.term.command);
-  params.set("cwd", props.term.cwd);
   if (props.conversationId) params.set("conversation_id", props.conversationId);
   if (props.model) params.set("model", props.model);
   const wsUrl = `${protocol}//${window.location.host}/api/exec-ws?${params.toString()}`;
