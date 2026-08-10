@@ -26,13 +26,14 @@
    docs. Leave docs untracked or unstaged; do not bundle them into code
    commits either.
 11. If you are testing Shelley itself, be aware that you might be running "under" shelley,
-  and indiscriminately running pkill -f shelley may break things.
-12. To test the Shelley UI in a separate instance, build with `make build`, then run on a
-    different port with a separate database:
+and indiscriminately running pkill -f shelley may break things.
+12. Shelley must always be started or restarted on port 9000 unless the user explicitly
+   requests another port. To test the Shelley UI in a separate instance, build with
+   `make build`, then run on port 9000 with a separate database:
     ```
-    ./bin/shelley -config /exe.dev/shelley.json -db /tmp/shelley-test.db serve -port 8002
+    ./bin/shelley -config /exe.dev/shelley.json -db /tmp/shelley-test.db serve -port 9000
     ```
-    Then use browser tools to navigate to http://localhost:8002/ and interact with the UI.
+    Then use browser tools to navigate to http://localhost:9000/ and interact with the UI.
 13. NEVER use alert(), confirm(), or prompt(). Use proper UI components like tooltips, modals, or toasts instead.
 14. SQL migrations and frontend changes require rebuilding the binary (`make build` or `go generate ./... && cd ui && pnpm run build`).
 15. Tool changes and UI tool widget updates go hand in hand. When you add, rename, remove, or
