@@ -971,6 +971,10 @@ function disposeEditor() {
   modifiedEditor.value = null;
 }
 
+// Keep this declaration above the immediate visual-mode watcher below. The
+// watcher runs during setup and may dispose an editor before it is created.
+let diffUpdateDisposable: Monaco.IDisposable | null = null;
+
 // Create Monaco only for visual mode with a mounted, visible container.
 // Text mode (incl. screen-reader default) never mounts Monaco — a hidden
 // editor still injects blank a11y nodes VO+L/C will hit before the summary.
@@ -1014,8 +1018,6 @@ watch(isMobile, (mob) => {
 });
 
 // Swap models into the existing editor when fileDiff changes.
-let diffUpdateDisposable: Monaco.IDisposable | null = null;
-
 function applyFileDiffToEditor() {
   if (
     readingMode.value !== "visual" ||
