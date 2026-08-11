@@ -10,6 +10,21 @@ multi-model, single-user coding agent built for but not exclusive to
 [exe.dev](https://exe.dev/). It does not come with authorization or sandboxing:
 bring your own.
 
+## VaxTui enhancements
+
+- VoiceOver-first navigation, reliable focus escape from the workspace editor,
+  descriptive path controls, and text diffs by default.
+- Durable named workspaces with short URL slugs, a unified file tree and editor,
+  and folder selection that restores the intended workspace.
+- Terminals owned by a workspace or herd, with stale-session pruning and bulk
+  cleanup instead of conversation-local terminal clutter.
+- Compact conversation summaries that reveal full transcripts only after a
+  conversation is opened.
+- Manual editor saves by default, including an accessible dirty-file prompt
+  before closing an unsaved tab.
+- Resilient multi-provider onboarding that keeps valid providers available when
+  another provider cannot be discovered, plus optional native DeepSeek support.
+
 *Mobile-friendly* because ideas can come any time.
 
 *Web-based*, because terminal-based scroll back is punishment for shoplifting in some countries.
@@ -122,4 +137,3 @@ run
 ```
 socat TCP-LISTEN:9001,fork TCP:localhost:9000
 ```
-
