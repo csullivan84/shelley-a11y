@@ -46,8 +46,8 @@ func TestAll(t *testing.T) {
 	}
 }
 
-func TestDeepSeekV4CapabilityDescriptions(t *testing.T) {
-	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-fireworks", "deepseek-v4-pro-fireworks"} {
+func TestDeepSeekV4ProviderCapabilityDescriptions(t *testing.T) {
+	for _, id := range []string{"deepseek-v4-flash-fireworks", "deepseek-v4-pro-fireworks"} {
 		model := ByID(id)
 		if model == nil {
 			t.Fatalf("model %q missing", id)
@@ -71,6 +71,8 @@ func TestByID(t *testing.T) {
 		{id: "gpt-5.6-luna", wantID: "gpt-5.6-luna"},
 		{id: "gpt-5.5", wantID: "gpt-5.5"},
 		{id: "gpt-5.5-pro", wantNil: true},
+		{id: "deepseek-v4-flash", wantNil: true},
+		{id: "deepseek-v4-pro", wantNil: true},
 		{id: "deepseek-v4-pro-fireworks", wantID: "deepseek-v4-pro-fireworks"},
 		{id: "gpt-oss-20b-fireworks", wantID: "gpt-oss-20b-fireworks"},
 		{id: "gpt-5.3-codex", wantID: "gpt-5.3-codex"},

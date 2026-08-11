@@ -1,7 +1,7 @@
 # Shelley: a coding agent for exe.dev
 
 > **This repository is the [VaxTui](https://github.com/csullivan84/VaxTui) fork** —
-> VoiceOver-first Shelley with a11y hardening and optional native DeepSeek.
+> VoiceOver-first Shelley with accessibility hardening.
 > Upstream lives at [boldsoftware/shelley](https://github.com/boldsoftware/shelley).
 > See [FORK.md](./FORK.md). The binary remains `shelley`.
 
@@ -11,6 +11,12 @@ multi-model, single-user coding agent built for but not exclusive to
 bring your own.
 
 ## VaxTui enhancements
+
+Subscription-backed providers such as ChatGPT and OpenCode are discovered and
+can be imported during onboarding from their existing local credentials.
+
+Herds group related, long-running terminals into durable work packs with shared lifecycle controls.
+VaxTui makes Herds accessible through semantic controls, status announcements, and predictable focus.
 
 - VoiceOver-first navigation, reliable focus escape from the workspace editor,
   descriptive path controls, and text diffs by default.
@@ -22,8 +28,8 @@ bring your own.
   conversation is opened.
 - Manual editor saves by default, including an accessible dirty-file prompt
   before closing an unsaved tab.
-- Resilient multi-provider onboarding that keeps valid providers available when
-  another provider cannot be discovered, plus optional native DeepSeek support.
+- Resilient multi-provider onboarding keeps valid providers available when
+  another provider cannot be discovered.
 
 *Mobile-friendly* because ideas can come any time.
 

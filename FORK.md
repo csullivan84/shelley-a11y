@@ -6,7 +6,7 @@ VoiceOver-first fork of [boldsoftware/shelley](https://github.com/boldsoftware/s
 **Binary:** still `shelley` (upstream-compatible; rename later if needed)  
 **Default branch:** `main` (this tree is the product; `fork/lazy-sunday` was the early work branch)
 
-**Purpose:** Screen-reader-friendly coding agent UI, plus practical BYO keys (now Codex OAuth for OpenAI; previously native DeepSeek) for a single-user blind operator.
+**Purpose:** Screen-reader-friendly coding agent UI with subscription and provider discovery for a single-user blind operator.
 
 **Upstream:** `upstream` remote → `boldsoftware/shelley`  
 **Origin:** `origin` remote → [`csullivan84/VaxTui`](https://github.com/csullivan84/VaxTui)
@@ -25,7 +25,7 @@ When resolving conflicts: keep VaxTui a11y contracts (announcer, tool bodies, VO
 
 ## Fork deltas (high level)
 
-- Codex OAuth for OpenAI via the existing Codex CLI session (`~/.codex/auth.json`) — defaults to `gpt-5.6-luna` when no explicit `--default-model` is set (replaces the earlier native DeepSeek V4 Flash / Pro via `$DEEPSEEK_API_KEY`)
+- Codex OAuth for OpenAI via the existing Codex CLI session (`~/.codex/auth.json`) — defaults to `gpt-5.6-luna` when no explicit `--default-model` is set and replaces the retired direct DeepSeek integration
 - VoiceOver status announcements (agent working / idle / stream faults)
 - Tool and transcript a11y (collapsed output stays reachable, live-region hygiene)
 - Screen reader mode in the overflow menu (expand tools; markdown still via command palette)
@@ -44,7 +44,7 @@ make build
 # override: ./bin/shelley --db /tmp/vaxtui.db --default-model gpt-5.6-luna serve -port 8002
 ```
 
-Previous DeepSeek path (`DEEPSEEK_API_KEY` → `deepseek-v4-flash`) was removed in 76f9ac8 in favor of Codex OAuth. The Responses API base for Codex is `https://chatgpt.com/backend-api/codex` (no `/v1`).
+The previous direct DeepSeek path was removed in favor of provider discovery and Codex OAuth. The Responses API base for Codex is `https://chatgpt.com/backend-api/codex` (no `/v1`).
 
 ## Upstream contributions
 
