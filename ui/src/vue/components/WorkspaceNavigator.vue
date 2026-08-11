@@ -1,33 +1,5 @@
 <template>
-  <aside class="workspace-navigator" aria-label="Workspace navigation">
-    <div class="workspace-nav-header">
-      <label class="sr-only" for="saved-workspace-select">Saved workspace</label>
-      <select
-        id="saved-workspace-select"
-        class="workspace-select"
-        :value="workspace?.id || ''"
-        aria-label="Saved workspace"
-        @change="selectSavedWorkspace"
-      >
-        <option v-for="item in workspaces" :key="item.id" :value="item.id">
-          {{ item.slug }}
-        </option>
-      </select>
-      <button
-        type="button"
-        class="workspace-dir"
-        :title="cwd"
-        :aria-label="`Choose workspace folder. Current path: ${cwd}`"
-        @click="showDirectoryPicker = true"
-      >
-        <span>{{ workspace?.slug || directoryName }}</span>
-        <small>{{ cwd }}</small>
-      </button>
-      <button type="button" class="workspace-refresh" aria-label="Refresh workspace" @click="refresh">
-        ↻
-      </button>
-    </div>
-
+  <aside class="workspace-navigator" aria-label="Workspace files">
     <div class="workspace-nav-tabs" role="tablist" aria-label="Workspace navigation view">
       <button
         type="button"
@@ -135,33 +107,21 @@
       </div>
     </template>
 
-    <DirectoryPickerModal
-      :is-open="showDirectoryPicker"
-      :initial-path="cwd"
-      @close="showDirectoryPicker = false"
-      @select="selectDirectory"
-    />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import { api } from "../../services/api";
 import type { GitCommitDetail, GitGraphCommit } from "../../types";
-import type { Workspace } from "../../services/api";
-import DirectoryPickerModal from "./DirectoryPickerModal.vue";
 
 const props = defineProps<{
   cwd: string;
-  workspace?: Workspace | null;
-  workspaces?: Workspace[];
   refreshNonce?: number;
 }>();
 const emit = defineEmits<{
   "open-file": [path: string];
-  "change-directory": [path: string];
-  "select-workspace": [id: string];
   "open-diff": [];
 }>();
 
@@ -178,11 +138,8 @@ const historyError = ref<string | null>(null);
 const commits = ref<GitGraphCommit[]>([]);
 const selectedCommit = ref<string | null>(null);
 const commitDetail = ref<GitCommitDetail | null>(null);
-const showDirectoryPicker = ref(false);
 let searchTimer: number | null = null;
 let searchController: AbortController | null = null;
-
-const directoryName = computed(() => props.cwd.split("/").filter(Boolean).pop() || props.cwd || "Home");
 
 function absolutePath(relative: string) {
   return `${props.cwd.replace(/\/+$/, "")}/${relative}`;
@@ -269,16 +226,6 @@ function refresh() {
   if (view.value === "history") void loadHistory();
 }
 
-function selectDirectory(path: string) {
-  showDirectoryPicker.value = false;
-  if (path && path !== props.cwd) emit("change-directory", path);
-}
-
-function selectSavedWorkspace(event: Event) {
-  const id = (event.target as HTMLSelectElement).value;
-  if (id && id !== props.workspace?.id) emit("select-workspace", id);
-}
-
 watch(query, () => {
   if (searchTimer) window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => void loadFiles(), 120);
@@ -304,65 +251,14 @@ watch(view, (next) => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
 }
 
-.workspace-nav-header,
 .workspace-nav-tabs {
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border);
-}
-
-.workspace-nav-header {
-  flex-wrap: wrap;
-}
-
-.workspace-select {
-  width: 100%;
-  padding: 0.45rem 0.65rem;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.workspace-dir {
-  min-width: 0;
-  flex: 1;
-  padding: 0.65rem 0.75rem;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-weight: 650;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-dir span,
-.workspace-dir small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-dir small {
-  margin-top: 0.15rem;
-  color: var(--text-tertiary);
-  font: 0.68rem ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 400;
-}
-
-.workspace-refresh {
-  padding: 0.45rem 0.65rem;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 1.1rem;
 }
 
 .workspace-nav-tabs button {

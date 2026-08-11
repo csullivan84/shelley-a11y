@@ -81,6 +81,7 @@
         />
         <WorkspaceShell
           v-else
+          v-model:active-pane="workspacePane"
           :cwd="workspaceCwd"
           :workspace="currentWorkspace"
           :workspaces="workspaces"
@@ -115,6 +116,8 @@
             :on-cwd-change="setWorkspaceDirectory"
             :on-open-models-modal="() => (modelsModalOpen = true)"
             :on-open-file-finder="openFileFinder"
+            :show-terminal-panel="false"
+            :on-terminal-auto-focus="openTerminalWorkbench"
             :ephemeral-terminals="conversationTerminals"
             :set-ephemeral-terminals="setEphemeralTerminals"
             :on-terminal-attached="handleTerminalAttached"
@@ -123,6 +126,22 @@
             :on-conversation-unarchived="handleConversationUnarchived"
             :external-comment-text="editorCommentText"
           />
+          <template #workbench="{ openRequest }">
+            <WorkspaceWorkbench
+              :cwd="workspaceCwd"
+              :open-request="openRequest"
+              :terminals="conversationTerminals"
+              :conversation-id="currentConversationId"
+              :workspace-id="currentWorkspace?.id"
+              :auto-focus-id="terminalAutoFocusId"
+              @comment="onEditorComment"
+              @attached="handleTerminalAttached"
+              @close="handleTerminalClose"
+              @insert-into-input="handleTerminalInsert"
+              @auto-focus-consumed="handleTerminalAutoFocusConsumed"
+              @active-terminal-exited="focusMessageInputIfUnfocused"
+            />
+          </template>
         </WorkspaceShell>
       </div>
 
@@ -266,6 +285,7 @@ import FeatureFlagsModal from "./components/FeatureFlagsModal.vue";
 import FileFinderModal from "./components/FileFinderModal.vue";
 import OnboardingPage from "./components/OnboardingPage.vue";
 import WorkspaceShell from "./components/WorkspaceShell.vue";
+import WorkspaceWorkbench from "./components/WorkspaceWorkbench.vue";
 import Button from "primevue/button";
 import type { EphemeralTerminal } from "./components/terminalTypes";
 import { focusMessageInputIfUnfocused } from "../utils/focusMessageInput";
@@ -423,6 +443,8 @@ const featureFlagsModalOpen = ref(false);
 // Fuzzy file finder (Cmd/Ctrl+Shift+P) + the generic editor it opens.
 const fileFinderOpen = ref(false);
 const workspaceOpenRequest = ref<{ path: string; nonce: number } | null>(null);
+const workspacePane = ref<"chat" | "files" | "workbench">("chat");
+const terminalAutoFocusId = ref<string | null>(null);
 // Comment submitted from the file editor's comment mode, to be injected into
 // the chat message input. Fresh object per submit so the watcher always fires.
 const editorCommentText = ref<{ text: string } | null>(null);
@@ -471,6 +493,20 @@ function handleTerminalClose(id: string) {
     }
     return prev.filter((x) => x.id !== id);
   });
+}
+
+function openTerminalWorkbench(id: string) {
+  terminalAutoFocusId.value = id;
+  workspacePane.value = "workbench";
+}
+
+function handleTerminalAutoFocusConsumed() {
+  terminalAutoFocusId.value = null;
+}
+
+function handleTerminalInsert(text: string) {
+  editorCommentText.value = { text };
+  workspacePane.value = "chat";
 }
 
 // ---- derived ----
@@ -715,6 +751,7 @@ function openProviderSetup() {
 function startNewConversation() {
   currentConversationId.value = null;
   viewedConversation.value = null;
+  workspacePane.value = "chat";
   const path = currentWorkspace.value ? `/${currentWorkspace.value.slug}` : "/new";
   window.history.replaceState({}, "", path);
   drawerOpen.value = false;
@@ -724,6 +761,7 @@ async function startNewConversationWithCwd(cwd: string) {
   if (!(await openWorkspacePath(cwd, true))) return;
   currentConversationId.value = null;
   viewedConversation.value = null;
+  workspacePane.value = "chat";
   drawerOpen.value = false;
   cwdSyncTrigger.value++;
 }
@@ -748,6 +786,7 @@ function selectConversation(conversation: Conversation) {
   herdsRouteId.value = null;
   currentConversationId.value = conversation.conversation_id;
   viewedConversation.value = conversation;
+  workspacePane.value = "chat";
   if (conversation.cwd) void openWorkspacePath(conversation.cwd, false);
   drawerOpen.value = false;
 }

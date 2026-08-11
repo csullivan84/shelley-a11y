@@ -296,6 +296,7 @@
 
     <!-- Terminal Panel -->
     <TerminalPanel
+      v-if="showTerminalPanel"
       :terminals="ephemeralTerminals"
       :conversation-id="conversationId"
       :workspace-id="workspaceId"
@@ -578,6 +579,8 @@ const props = withDefaults(
     ) => void;
     onTerminalAttached?: (id: string, termId: string) => void;
     onTerminalClose?: (id: string) => void;
+    onTerminalAutoFocus?: (id: string) => void;
+    showTerminalPanel?: boolean;
     navigateUserMessageTrigger?: number;
     onConversationUnarchived?: (conversation: Conversation) => void;
     onDraftCreated?: (conversationId: string) => void;
@@ -588,6 +591,7 @@ const props = withDefaults(
   {
     streamStatus: "connected",
     reconnectNonce: 0,
+    showTerminalPanel: true,
   },
 );
 
@@ -2317,6 +2321,7 @@ async function sendMessage(message: string) {
       if (interactiveShells.includes(baseName)) {
         terminalAutoFocusId.value = terminal.id;
       }
+      props.onTerminalAutoFocus?.(terminal.id);
       setTimeout(() => scrollToBottom(), 100);
     }
     return;
@@ -2453,6 +2458,7 @@ function openInAppTerminal() {
   };
   props.setEphemeralTerminals((prev) => [...prev, terminal]);
   terminalAutoFocusId.value = terminal.id;
+  props.onTerminalAutoFocus?.(terminal.id);
   setTimeout(() => scrollToBottom(), 100);
 }
 // Focus an already-open terminal if there is one, otherwise open a new one.
@@ -2469,6 +2475,7 @@ function focusOrOpenTerminal() {
     const id = existing[existing.length - 1].id;
     nextTick(() => {
       terminalAutoFocusId.value = id;
+      props.onTerminalAutoFocus?.(id);
     });
     return;
   }

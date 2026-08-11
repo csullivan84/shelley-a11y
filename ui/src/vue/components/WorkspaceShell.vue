@@ -1,79 +1,84 @@
 <template>
   <div class="workspace-shell">
-    <nav class="workspace-mobile-tabs" aria-label="Workspace pane">
+    <WorkspaceControls
+      :cwd="cwd"
+      :workspace="workspace"
+      :workspaces="workspaces"
+      @change-directory="emit('change-directory', $event)"
+      @select-workspace="emit('select-workspace', $event)"
+      @refresh="refreshNonce++"
+    />
+    <nav class="workspace-tabs" role="tablist" aria-label="Workspace view">
       <button
         v-for="pane in panes"
         :key="pane"
         type="button"
-        :class="{ active: mobilePane === pane }"
-        :aria-pressed="mobilePane === pane"
-        @click="mobilePane = pane"
+        role="tab"
+        :aria-selected="activePane === pane"
+        :class="{ active: activePane === pane }"
+        @click="activePane = pane"
       >
-        {{ pane }}
+        {{ paneLabels[pane] }}
       </button>
     </nav>
-    <WorkspaceNavigator
-      class="workspace-pane workspace-files-pane"
-      :class="{ 'mobile-active': mobilePane === 'Files' }"
-      :cwd="cwd"
-      :workspace="workspace"
-      :workspaces="workspaces"
-      :refresh-nonce="refreshNonce"
-      @open-file="openFile"
-      @change-directory="emit('change-directory', $event)"
-      @select-workspace="emit('select-workspace', $event)"
-      @open-diff="emit('open-diff')"
-    />
-    <WorkspaceEditor
-      class="workspace-pane workspace-code-pane"
-      :class="{ 'mobile-active': mobilePane === 'Editor' }"
-      :cwd="cwd"
-      :open-request="effectiveOpenRequest"
-      @comment="sendComment"
-      @saved="refreshNonce++"
-    />
-    <section
-      class="workspace-pane workspace-chat-pane"
-      :class="{ 'mobile-active': mobilePane === 'Shelley' }"
-      aria-label="Shelley conversation"
-    >
+
+    <section v-show="activePane === 'chat'" class="workspace-view workspace-chat-pane" aria-label="Shelley conversation">
       <slot />
+    </section>
+    <section v-if="activePane === 'files'" class="workspace-view workspace-files-pane" aria-label="Workspace files">
+      <WorkspaceNavigator
+        class="workspace-pane"
+        :cwd="cwd"
+        :refresh-nonce="refreshNonce"
+        @open-file="openFile"
+        @open-diff="emit('open-diff')"
+      />
+    </section>
+    <section v-show="activePane === 'workbench'" class="workspace-view workspace-workbench-pane" aria-label="Workbench">
+      <slot name="workbench" :open-request="effectiveOpenRequest" />
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
-import WorkspaceEditor from "./WorkspaceEditor.vue";
+import { computed, ref, watch } from "vue";
+import WorkspaceControls from "./WorkspaceControls.vue";
 import WorkspaceNavigator from "./WorkspaceNavigator.vue";
 import type { Workspace } from "../../services/api";
+
+type WorkspacePane = "chat" | "files" | "workbench";
+
+const paneLabels: Record<WorkspacePane, string> = {
+  chat: "Chat",
+  files: "Files",
+  workbench: "Workbench",
+};
 
 const props = defineProps<{
   cwd: string;
   workspace?: Workspace | null;
   workspaces?: Workspace[];
   openRequest?: { path: string; nonce: number } | null;
+  activePane?: WorkspacePane;
 }>();
 const emit = defineEmits<{
-  comment: [text: string];
   "change-directory": [path: string];
   "select-workspace": [id: string];
   "open-diff": [];
+  "update:activePane": [pane: WorkspacePane];
 }>();
 
-const panes = ["Files", "Editor", "Shelley"] as const;
-const mobilePane = ref<(typeof panes)[number]>("Shelley");
+const panes = ["chat", "files", "workbench"] as const;
+const activePane = computed({
+  get: () => props.activePane || "chat",
+  set: (pane: WorkspacePane) => emit("update:activePane", pane),
+});
 const refreshNonce = ref(0);
 const effectiveOpenRequest = ref<{ path: string; nonce: number } | null>(null);
 
 function openFile(path: string) {
   effectiveOpenRequest.value = { path, nonce: Date.now() };
-  mobilePane.value = "Editor";
-}
-
-function sendComment(text: string) {
-  mobilePane.value = "Shelley";
-  emit("comment", text);
+  activePane.value = "workbench";
 }
 
 watch(
@@ -81,7 +86,7 @@ watch(
   (request) => {
     if (!request) return;
     effectiveOpenRequest.value = request;
-    mobilePane.value = "Editor";
+    activePane.value = "workbench";
   },
 );
 </script>
@@ -92,65 +97,49 @@ watch(
   min-height: 0;
   height: 100%;
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(12rem, 16rem) minmax(22rem, 1fr) minmax(25rem, 40%);
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
 }
 
+.workspace-view,
 .workspace-pane {
   min-width: 0;
   min-height: 0;
 }
 
-.workspace-code-pane,
-.workspace-chat-pane {
-  border-right: 1px solid var(--border);
+.workspace-view {
+  flex: 1;
 }
 
 .workspace-chat-pane {
   display: flex;
   flex-direction: column;
-  border-right: 0;
 }
 
-.workspace-mobile-tabs {
-  display: none;
+.workspace-files-pane,
+.workspace-workbench-pane {
+  overflow: hidden;
 }
 
-@media (max-width: 980px) {
-  .workspace-shell {
-    display: flex;
-    flex-direction: column;
-  }
+.workspace-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
 
-  .workspace-mobile-tabs {
-    display: flex;
-    flex: 0 0 auto;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-  }
+.workspace-tabs button {
+  min-width: 6rem;
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
 
-  .workspace-mobile-tabs button {
-    flex: 1;
-    padding: 0.55rem;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--text-secondary);
-  }
-
-  .workspace-mobile-tabs button.active {
-    border-color: var(--accent, #3b82f6);
-    color: var(--text-primary);
-  }
-
-  .workspace-pane {
-    display: none;
-    flex: 1;
-  }
-
-  .workspace-pane.mobile-active {
-    display: flex;
-  }
+.workspace-tabs button.active {
+  border-color: var(--accent, #3b82f6);
+  color: var(--text-primary);
 }
 </style>
