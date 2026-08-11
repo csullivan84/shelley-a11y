@@ -354,6 +354,7 @@ type Server struct {
 	mu                       sync.Mutex
 	logger                   *slog.Logger
 	predictableOnly          bool
+	defaultModelMu           sync.RWMutex
 	defaultModel             string
 	requireHeader            string
 	refreshBuiltModels       func(context.Context) ([]models.Built, error)
@@ -512,8 +513,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/write-file", http.HandlerFunc(s.handleWriteFile))                                             // Small response
 	mux.Handle("/api/read-file", compressionHandler(http.HandlerFunc(s.handleReadFile)))                           // Reads arbitrary text files as JSON
 	mux.Handle("/api/user-agents-md", http.HandlerFunc(s.handleUserAgentsMd))                                      // Small response
-	mux.HandleFunc("/api/exec-ws", s.handleExecWS)                                                                 // Websocket for shell commands
-	mux.HandleFunc("GET /api/terminals", s.handleTerminalsList)                                                    // List persistent dtach sessions
+	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", s.handleCreateWorkspace)
+	mux.HandleFunc("GET /api/workspaces/{slug}", s.handleGetWorkspace)
+	mux.HandleFunc("PATCH /api/workspaces/{slug}", s.handlePatchWorkspace)
+	mux.HandleFunc("/api/exec-ws", s.handleExecWS)              // Websocket for shell commands
+	mux.HandleFunc("GET /api/terminals", s.handleTerminalsList) // List persistent dtach sessions
 	mux.HandleFunc("DELETE /api/terminals/{id}", s.handleTerminalDelete)
 	mux.HandleFunc("POST /api/terminals/{id}/kill", s.handleTerminalDelete)
 
@@ -531,8 +536,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/herds/{herd_id}/open", s.handleHerdOpenAll)
 	mux.HandleFunc("POST /api/herds/{herd_id}/close", s.handleHerdCloseAll)
 	mux.HandleFunc("GET /api/herds/{herd_id}/close-preview", s.handleHerdClosePreview)
-	mux.HandleFunc("GET /api/terminals/loose", s.handleLooseTerminals)
-	mux.HandleFunc("DELETE /api/terminals/loose", s.handleLooseTerminalsDelete)
+	mux.HandleFunc("GET /api/terminals/workspace", s.handleWorkspaceTerminals)
+	mux.HandleFunc("DELETE /api/terminals/workspace", s.handleWorkspaceTerminalsDelete)
 
 	// Custom models API
 	mux.Handle("/api/custom-models", http.HandlerFunc(s.handleCustomModels))

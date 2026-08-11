@@ -24,7 +24,26 @@ const (
 	KindXAIOAuth    = "xai-oauth"
 	KindOpenRouter  = "openrouter-api-key"
 	KindOpenCode    = "opencode-api-key"
+	openRouterModel = "openrouter/auto"
 )
+
+type oauthProvider struct {
+	kind         string
+	providerName string
+	baseURL      string
+	modelID      string
+}
+
+var oauthProviders = map[string]oauthProvider{
+	"openai-codex": {
+		kind: KindOpenAICodex, providerName: "OpenAI Codex",
+		baseURL: "https://chatgpt.com/backend-api/codex", modelID: "gpt-5.6-luna",
+	},
+	"xai-oauth": {
+		kind: KindXAIOAuth, providerName: "xAI",
+		baseURL: "https://api.x.ai/v1", modelID: "grok-4.5",
+	},
+}
 
 // Provider is one imported provider credential. Secret fields are persisted
 // only in Shelley's private provider store and are never returned by the API.
@@ -130,34 +149,51 @@ func Save(path string, config Config) error {
 }
 
 func Discover(home string) ([]Candidate, error) {
+	candidates, warnings, err := DiscoverAvailable(home)
+	if err != nil {
+		return nil, err
+	}
+	if len(warnings) > 0 {
+		return candidates, errors.New(strings.Join(warnings, "; "))
+	}
+	return candidates, nil
+}
+
+// DiscoverAvailable returns credentials from every readable source and a
+// warning for each unreadable source. One broken client configuration does
+// not hide valid credentials discovered from another client.
+func DiscoverAvailable(home string) ([]Candidate, []string, error) {
 	if home == "" {
 		var err error
 		home, err = os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	var candidates []Candidate
+	var warnings []string
 	hermes, err := discoverHermes(filepath.Join(home, ".hermes", "auth.json"))
 	if err != nil {
-		return nil, err
+		warnings = append(warnings, err.Error())
+	} else {
+		candidates = append(candidates, hermes...)
 	}
-	candidates = append(candidates, hermes...)
 	opencode, err := discoverOpenCode(
 		filepath.Join(home, ".local", "share", "opencode", "auth.json"),
 		filepath.Join(home, ".config", "opencode", "opencode.jsonc"),
 	)
 	if err != nil {
-		return nil, err
+		warnings = append(warnings, err.Error())
+	} else {
+		candidates = append(candidates, opencode...)
 	}
-	candidates = append(candidates, opencode...)
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Source != candidates[j].Source {
 			return candidates[i].Source < candidates[j].Source
 		}
 		return candidates[i].Label < candidates[j].Label
 	})
-	return candidates, nil
+	return candidates, warnings, nil
 }
 
 func Import(home, path string, ids []string, openRouterKey string) (Config, error) {
@@ -165,7 +201,7 @@ func Import(home, path string, ids []string, openRouterKey string) (Config, erro
 	if err != nil {
 		return Config{}, err
 	}
-	candidates, err := Discover(home)
+	candidates, _, err := DiscoverAvailable(home)
 	if err != nil {
 		return Config{}, err
 	}
@@ -191,8 +227,8 @@ func Import(home, path string, ids []string, openRouterKey string) (Config, erro
 			Label:       "OpenRouter",
 			AccessToken: key,
 			BaseURL:     "https://openrouter.ai/api/v1",
-			ModelID:     "openrouter/auto",
-			ModelName:   "openrouter/auto",
+			ModelID:     openRouterModel,
+			ModelName:   openRouterModel,
 		}
 		providers[providerKey(provider)] = provider
 	}
@@ -263,11 +299,10 @@ func PreferredModel(config Config) string {
 			if provider.ModelID != "" {
 				return provider.ModelID
 			}
-			switch provider.Kind {
-			case KindOpenAICodex:
-				return "gpt-5.6-luna"
-			case KindXAIOAuth:
-				return "grok-4.5"
+			for _, spec := range oauthProviders {
+				if provider.Kind == spec.kind {
+					return spec.modelID
+				}
 			}
 		}
 	}
@@ -347,8 +382,8 @@ func discoverHermes(path string) ([]Candidate, error) {
 			Label:       firstNonEmpty(credential.Label, "Hermes OpenRouter"),
 			AccessToken: credential.AccessToken,
 			BaseURL:     firstNonEmpty(credential.BaseURL, "https://openrouter.ai/api/v1"),
-			ModelID:     "openrouter/auto",
-			ModelName:   "openrouter/auto",
+			ModelID:     openRouterModel,
+			ModelName:   openRouterModel,
 		}
 		out = append(out, Candidate{ID: "hermes:openrouter:" + id, Source: "Hermes", Provider: "OpenRouter", Label: provider.Label, AuthType: "API key", ModelID: provider.ModelID, secret: provider})
 	}
@@ -356,16 +391,11 @@ func discoverHermes(path string) ([]Candidate, error) {
 }
 
 func oauthCandidate(id, providerID, label string, credential oauthCredential) Candidate {
-	kind := KindOpenAICodex
-	providerName := "OpenAI Codex"
-	baseURL := firstNonEmpty(credential.BaseURL, "https://chatgpt.com/backend-api/codex")
-	modelID := "gpt-5.6-luna"
-	if providerID == "xai-oauth" {
-		kind = KindXAIOAuth
-		providerName = "xAI"
-		baseURL = firstNonEmpty(credential.BaseURL, "https://api.x.ai/v1")
-		modelID = "grok-4.5"
-	}
+	spec := oauthProviders[providerID]
+	kind := spec.kind
+	providerName := spec.providerName
+	baseURL := firstNonEmpty(credential.BaseURL, spec.baseURL)
+	modelID := spec.modelID
 	accountID := credential.Tokens.AccountID
 	if accountID == "" && kind == KindOpenAICodex {
 		accountID = openAIAccountID(credential.AccessToken)

@@ -30,7 +30,7 @@
   />
 
   <!-- Loading gate -->
-  <div v-else-if="loading && conversations.length === 0" class="loading-container">
+  <div v-else-if="workspaceLoading || (loading && conversations.length === 0)" class="loading-container">
     <div class="loading-content">
       <div class="spinner" style="margin: 0 auto 1rem" />
       <p class="text-secondary">{{ t("loading") }}</p>
@@ -38,14 +38,14 @@
   </div>
 
   <div
-    v-else-if="error && conversations.length === 0"
+    v-else-if="error && (conversations.length === 0 || !currentWorkspace)"
     class="error-container"
     role="alert"
     aria-live="assertive"
   >
     <div class="error-content">
       <p class="error-message" style="margin-bottom: 1rem">{{ error }}</p>
-      <Button :label="t('retry')" @click="loadConversations" />
+      <Button :label="t('retry')" @click="retryStartup" />
     </div>
   </div>
 
@@ -82,13 +82,17 @@
         <WorkspaceShell
           v-else
           :cwd="workspaceCwd"
+          :workspace="currentWorkspace"
+          :workspaces="workspaces"
           :open-request="workspaceOpenRequest"
           @comment="onEditorComment"
           @change-directory="changeWorkspaceDirectory"
+          @select-workspace="selectWorkspaceById"
           @open-diff="diffViewerTrigger++"
         >
           <ChatInterface
             :conversation-id="currentConversationId"
+            :workspace-id="currentWorkspace?.id"
             :stream-status="streamStatus"
             :reconnect-nonce="reconnectNonce"
             :on-open-drawer="() => (drawerOpen = true)"
@@ -126,6 +130,7 @@
         :is-open="commandPaletteOpen"
         :conversations="topLevelConversations"
         :current-conversation="currentConversation || null"
+        :cwd="workspaceCwd"
         :has-cwd="commandPaletteHasCwd"
         @close="onCommandPaletteClose"
         @new-conversation="
@@ -269,7 +274,7 @@ import {
   type ConversationWithState,
   type ConversationListPatchEvent,
 } from "../types";
-import { api, type OnboardingStatus } from "../services/api";
+import { api, type OnboardingStatus, type Workspace } from "../services/api";
 import { messageStore } from "../services/messageStore";
 import {
   reduceConversationListPatch,
@@ -319,8 +324,17 @@ function getHerdIdFromPath(): string | null {
   return null;
 }
 
+function getWorkspaceSlugFromPath(): string | null {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts.length !== 1) return null;
+  const slug = parts[0];
+  if (["new", "herds", "c", "api", "export", "debug", "version"].includes(slug)) return null;
+  return slug;
+}
+
 // Captured BEFORE render so URL-updating effects don't clobber it.
 const initialSlugFromUrl = getSlugFromPath();
+const initialWorkspaceSlug = getWorkspaceSlugFromPath();
 // The root is the workspace and a fresh Shelley query. Existing conversations
 // are opened only through an explicit /c/:slug URL or the conversation drawer.
 const initialIsNew = !getSlugFromPath();
@@ -338,7 +352,7 @@ function navigateHerd(id: string | null) {
 function leaveHerds() {
   herdsRouteActive.value = false;
   herdsRouteId.value = null;
-  window.history.pushState({}, "", "/");
+  window.history.pushState({}, "", currentWorkspace.value ? `/${currentWorkspace.value.slug}` : "/");
   updatePageTitle(currentConversation.value);
 }
 
@@ -372,7 +386,9 @@ function updateUrlWithSlug(conversation: Conversation | undefined) {
   }
   if (currentSlug !== newSlug) {
     if (newSlug) window.history.replaceState({}, "", `/c/${newSlug}`);
-    else window.history.replaceState({}, "", "/");
+    else if (currentWorkspace.value) {
+      window.history.replaceState({}, "", `/${currentWorkspace.value.slug}`);
+    } else window.history.replaceState({}, "", "/");
   }
 }
 
@@ -419,12 +435,9 @@ const ephemeralTerminals = ref<EphemeralTerminal[]>([]);
 const streamStatus = ref<StreamStatus>("connected");
 const reconnectNonce = ref(0);
 const showActiveTrigger = ref(0);
-const workspaceDirectory = ref(
-  localStorage.getItem("shelley_selected_cwd") ||
-    window.__SHELLEY_INIT__?.default_cwd ||
-    window.__SHELLEY_INIT__?.home_dir ||
-    "",
-);
+const workspaces = ref<Workspace[]>([]);
+const currentWorkspace = ref<Workspace | null>(null);
+const workspaceLoading = ref(true);
 const onboardingStatus = ref<OnboardingStatus | null>(null);
 const onboardingLoading = ref(true);
 const onboardingError = ref<string | null>(null);
@@ -481,51 +494,24 @@ const currentConversation = computed<ConversationWithState | undefined>(() => {
   return undefined;
 });
 
-// A terminal belongs to the conversation that created it. Herd terminals are
-// rendered inside their herd control room, and loose terminals are managed
-// from the Herds page rather than leaking into every conversation's dock.
+// Ordinary terminals belong to the active workspace. Herd membership
+// supersedes workspace placement until the terminal is detached from the herd.
 const conversationTerminals = computed(() =>
   ephemeralTerminals.value.filter(
     (terminal) =>
-      !terminal.herdId && terminal.conversationId === currentConversationId.value,
+      !terminal.herdId && terminal.workspaceId === currentWorkspace.value?.id,
   ),
 );
 
-const mostRecentCwd = computed(
-  () =>
-    currentConversation.value?.cwd ||
-    (topLevelConversations.value.length > 0 ? topLevelConversations.value[0].cwd : null),
-);
-
-const commandPaletteHasCwd = computed(
-  () =>
-    !!(
-      currentConversation.value?.cwd ||
-      mostRecentCwd.value ||
-      localStorage.getItem("shelley_selected_cwd") ||
-      window.__SHELLEY_INIT__?.default_cwd
-    ),
-);
-
-// Directory the fuzzy file finder searches: the current conversation's cwd,
-// else the last-used/most-recent cwd, else the server default, else $HOME.
-const finderDir = computed(
-  () =>
-    currentConversation.value?.cwd ||
-    mostRecentCwd.value ||
-    localStorage.getItem("shelley_selected_cwd") ||
-    window.__SHELLEY_INIT__?.default_cwd ||
-    "",
-);
 const workspaceCwd = computed(
   () =>
-    workspaceDirectory.value ||
-    currentConversation.value?.cwd ||
-    mostRecentCwd.value ||
+    currentWorkspace.value?.path ||
     window.__SHELLEY_INIT__?.default_cwd ||
     window.__SHELLEY_INIT__?.home_dir ||
     "",
 );
+const commandPaletteHasCwd = computed(() => workspaceCwd.value !== "");
+const finderDir = workspaceCwd;
 provide(WorkspaceContextKey, { cwd: workspaceCwd, openFile: openFileInEditor });
 
 // ---- navigation ----
@@ -664,6 +650,34 @@ async function loadConversations() {
   }
 }
 
+async function loadWorkspaces() {
+  workspaceLoading.value = true;
+  try {
+    const available = await api.getWorkspaces();
+    workspaces.value = available;
+    let selected: Workspace | undefined;
+    if (initialWorkspaceSlug) {
+      selected = await api.getWorkspace(initialWorkspaceSlug);
+    } else {
+      const savedSlug = localStorage.getItem("shelley_selected_workspace");
+      selected = available.find((workspace) => workspace.slug === savedSlug) || available[0];
+    }
+    if (!selected) {
+      const initialPath =
+        window.__SHELLEY_INIT__?.default_cwd || window.__SHELLEY_INIT__?.home_dir || "";
+      if (!initialPath) throw new Error("Shelley did not provide an initial workspace path");
+      selected = await api.ensureWorkspace(initialPath);
+      workspaces.value = [selected];
+    }
+    setCurrentWorkspace(selected, false);
+    if (window.location.pathname === "/") {
+      window.history.replaceState({}, "", `/${selected.slug}`);
+    }
+  } finally {
+    workspaceLoading.value = false;
+  }
+}
+
 async function loadOnboarding() {
   onboardingLoading.value = true;
   onboardingError.value = null;
@@ -675,6 +689,14 @@ async function loadOnboarding() {
   } finally {
     onboardingLoading.value = false;
   }
+}
+
+function retryStartup() {
+  error.value = null;
+  void loadWorkspaces().catch((cause) => {
+    error.value = cause instanceof Error ? cause.message : "Failed to load workspaces";
+  });
+  void loadConversations();
 }
 
 function handleOnboardingComplete(status: OnboardingStatus) {
@@ -691,26 +713,23 @@ function openProviderSetup() {
 
 // ---- conversation actions ----
 function startNewConversation() {
-  if (currentConversation.value?.cwd) {
-    setWorkspaceDirectory(currentConversation.value.cwd);
-  }
   currentConversationId.value = null;
   viewedConversation.value = null;
-  window.history.replaceState({}, "", "/new");
+  const path = currentWorkspace.value ? `/${currentWorkspace.value.slug}` : "/new";
+  window.history.replaceState({}, "", path);
   drawerOpen.value = false;
 }
 
-function startNewConversationWithCwd(cwd: string) {
-  setWorkspaceDirectory(cwd);
+async function startNewConversationWithCwd(cwd: string) {
+  if (!(await openWorkspacePath(cwd, true))) return;
   currentConversationId.value = null;
   viewedConversation.value = null;
-  window.history.replaceState({}, "", "/new");
   drawerOpen.value = false;
   cwdSyncTrigger.value++;
 }
 
 function setConversationCwd(cwd: string) {
-  setWorkspaceDirectory(cwd);
+  void openWorkspacePath(cwd, false);
   const conv =
     conversations.value.find((c) => c.conversation_id === currentConversationId.value) ||
     (viewedConversation.value?.conversation_id === currentConversationId.value
@@ -729,6 +748,7 @@ function selectConversation(conversation: Conversation) {
   herdsRouteId.value = null;
   currentConversationId.value = conversation.conversation_id;
   viewedConversation.value = conversation;
+  if (conversation.cwd) void openWorkspacePath(conversation.cwd, false);
   drawerOpen.value = false;
 }
 
@@ -810,13 +830,42 @@ function openFileInEditor(absPath: string) {
   workspaceOpenRequest.value = { path: absPath, nonce: Date.now() };
 }
 
-function setWorkspaceDirectory(path: string) {
-  localStorage.setItem("shelley_selected_cwd", path);
-  workspaceDirectory.value = path;
+function setCurrentWorkspace(workspace: Workspace, navigate: boolean) {
+  currentWorkspace.value = workspace;
+  localStorage.setItem("shelley_selected_workspace", workspace.slug);
+  const index = workspaces.value.findIndex((item) => item.id === workspace.id);
+  if (index >= 0) {
+    workspaces.value = workspaces.value.map((item) => (item.id === workspace.id ? workspace : item));
+  } else {
+    workspaces.value = [workspace, ...workspaces.value];
+  }
+  if (navigate) window.history.pushState({}, "", `/${workspace.slug}`);
 }
 
-function changeWorkspaceDirectory(path: string) {
-  startNewConversationWithCwd(path);
+async function openWorkspacePath(path: string, navigate: boolean): Promise<boolean> {
+  try {
+    const workspace = await api.ensureWorkspace(path);
+    setCurrentWorkspace(workspace, navigate);
+    return true;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Failed to open workspace";
+    return false;
+  }
+}
+
+function setWorkspaceDirectory(path: string) {
+  void openWorkspacePath(path, false);
+}
+
+async function changeWorkspaceDirectory(path: string) {
+  await startNewConversationWithCwd(path);
+}
+
+function selectWorkspaceById(id: string) {
+  const workspace = workspaces.value.find((item) => item.id === id);
+  if (!workspace) return;
+  setCurrentWorkspace(workspace, true);
+  startNewConversation();
 }
 
 // A comment submitted from the file editor's comment mode: hand it to
@@ -949,6 +998,17 @@ async function handlePopState() {
   }
   herdsRouteActive.value = false;
   herdsRouteId.value = null;
+  const workspaceSlug = getWorkspaceSlugFromPath();
+  if (workspaceSlug) {
+    try {
+      setCurrentWorkspace(await api.getWorkspace(workspaceSlug), false);
+      currentConversationId.value = null;
+      viewedConversation.value = null;
+    } catch (cause) {
+      error.value = cause instanceof Error ? cause.message : "Failed to open workspace";
+    }
+    return;
+  }
   if (isNewPath()) {
     currentConversationId.value = null;
     viewedConversation.value = null;
@@ -996,6 +1056,9 @@ watch(
 onMounted(() => {
   initializeA11yTrace();
   void loadOnboarding();
+  void loadWorkspaces().catch((cause) => {
+    error.value = cause instanceof Error ? cause.message : "Failed to load workspaces";
+  });
   // Hydrate persistent terminals from the server.
   let cancelled = false;
   fetch("/api/terminals")
@@ -1007,8 +1070,8 @@ onMounted(() => {
           command: string;
           cwd: string;
           created_at: string;
-          owner_type?: "conversation" | "herd" | "loose";
-          conversation_id?: string;
+          owner_type?: "workspace" | "herd" | "unowned";
+          workspace_id?: string;
           herd_id?: string;
           herd_name?: string;
         }>,
@@ -1019,8 +1082,8 @@ onMounted(() => {
         const restored: EphemeralTerminal[] = rows
           .filter(
             (r) =>
-              r.owner_type === "conversation" &&
-              !!r.conversation_id &&
+              r.owner_type === "workspace" &&
+              !!r.workspace_id &&
               !have.has(r.id) &&
               !closedTerminalIds.has(r.id),
           )
@@ -1030,7 +1093,7 @@ onMounted(() => {
             command: r.command,
             cwd: r.cwd,
             createdAt: new Date(r.created_at || Date.now()),
-            conversationId: r.owner_type === "conversation" ? r.conversation_id : undefined,
+            workspaceId: r.workspace_id,
             herdId: r.owner_type === "herd" ? r.herd_id : undefined,
             herdName: r.owner_type === "herd" ? r.herd_name : undefined,
           }));

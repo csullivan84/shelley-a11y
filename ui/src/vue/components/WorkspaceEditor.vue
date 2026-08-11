@@ -62,6 +62,21 @@
       </div>
       <div ref="containerRef" class="workspace-monaco" :class="{ hidden: !activePath || !!error }" />
     </div>
+
+    <Modal
+      :is-open="!!pendingClosePath"
+      title="Unsaved changes"
+      @close="pendingClosePath = null"
+    >
+      <p>
+        {{ pendingClosePath ? relativePath(pendingClosePath) : "This file" }} has unsaved changes.
+      </p>
+      <template #footer>
+        <Button label="Cancel" text severity="secondary" @click="pendingClosePath = null" />
+        <Button label="Discard changes" severity="danger" @click="discardPendingClose" />
+        <Button label="Save and close" @click="saveAndClosePending" />
+      </template>
+    </Modal>
   </section>
 </template>
 
@@ -69,6 +84,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import type * as Monaco from "monaco-editor";
 import Button from "primevue/button";
+import Modal from "./Modal.vue";
 import { api } from "../../services/api";
 import { loadMonaco } from "../../services/monaco";
 import { isDarkModeActive } from "../../services/theme";
@@ -95,6 +111,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const saveStatus = ref<SaveStatus>("idle");
 const autosaveEnabled = ref(false);
+const pendingClosePath = ref<string | null>(null);
 const activeDirty = computed(() => !!activePath.value && dirtyPaths.value.has(activePath.value));
 let monaco: typeof Monaco | null = null;
 const saveTimers = new Map<string, number>();
@@ -274,6 +291,14 @@ async function save(path: string) {
 
 async function closeTab(path: string) {
   if (autosaveEnabled.value) await save(path);
+  if (dirtyPaths.value.has(path)) {
+    pendingClosePath.value = path;
+    return;
+  }
+  finishCloseTab(path);
+}
+
+function finishCloseTab(path: string) {
   const index = tabs.value.indexOf(path);
   tabs.value = tabs.value.filter((tab) => tab !== path);
   if (activePath.value === path) {
@@ -283,6 +308,25 @@ async function closeTab(path: string) {
   models.get(path)?.dispose();
   models.delete(path);
   persistTabs();
+}
+
+async function saveAndClosePending() {
+  const path = pendingClosePath.value;
+  if (!path) return;
+  await save(path);
+  if (dirtyPaths.value.has(path)) return;
+  pendingClosePath.value = null;
+  finishCloseTab(path);
+}
+
+function discardPendingClose() {
+  const path = pendingClosePath.value;
+  if (!path) return;
+  const nextDirty = new Set(dirtyPaths.value);
+  nextDirty.delete(path);
+  dirtyPaths.value = nextDirty;
+  pendingClosePath.value = null;
+  finishCloseTab(path);
 }
 
 function askShelley() {

@@ -16,9 +16,12 @@
       class="workspace-pane workspace-files-pane"
       :class="{ 'mobile-active': mobilePane === 'Files' }"
       :cwd="cwd"
+      :workspace="workspace"
+      :workspaces="workspaces"
       :refresh-nonce="refreshNonce"
       @open-file="openFile"
       @change-directory="emit('change-directory', $event)"
+      @select-workspace="emit('select-workspace', $event)"
       @open-diff="emit('open-diff')"
     />
     <WorkspaceEditor
@@ -43,14 +46,18 @@
 import { ref, watch } from "vue";
 import WorkspaceEditor from "./WorkspaceEditor.vue";
 import WorkspaceNavigator from "./WorkspaceNavigator.vue";
+import type { Workspace } from "../../services/api";
 
 const props = defineProps<{
   cwd: string;
+  workspace?: Workspace | null;
+  workspaces?: Workspace[];
   openRequest?: { path: string; nonce: number } | null;
 }>();
 const emit = defineEmits<{
   comment: [text: string];
   "change-directory": [path: string];
+  "select-workspace": [id: string];
   "open-diff": [];
 }>();
 

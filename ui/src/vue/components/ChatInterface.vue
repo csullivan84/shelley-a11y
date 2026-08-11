@@ -298,6 +298,7 @@
     <TerminalPanel
       :terminals="ephemeralTerminals"
       :conversation-id="conversationId"
+      :workspace-id="workspaceId"
       :model="selectedModel"
       :auto-focus-id="terminalAutoFocusId"
       :can-insert-into-input="true"
@@ -537,6 +538,7 @@ import MarkdownContent from "./MarkdownContent.vue";
 const props = withDefaults(
   defineProps<{
     conversationId: string | null;
+    workspaceId?: string;
     streamStatus?: "connected" | "reconnecting" | "disconnected";
     reconnectNonce?: number;
     onOpenDrawer: () => void;
@@ -848,7 +850,6 @@ const selectedCwd = ref<string>("");
 const cwdInitialized = ref(false);
 function setSelectedCwd(cwd: string) {
   selectedCwd.value = cwd;
-  localStorage.setItem("shelley_selected_cwd", cwd);
   props.onCwdChange?.(cwd);
 }
 
@@ -2307,7 +2308,7 @@ async function sendMessage(message: string) {
           window.__SHELLEY_INIT__?.default_cwd ||
           "/",
         createdAt: new Date(),
-        conversationId: props.conversationId || undefined,
+        workspaceId: props.workspaceId,
       };
       props.setEphemeralTerminals((prev) => [...prev, terminal]);
       const firstWord = shellCommand.split(/\s+/)[0];
@@ -2448,7 +2449,7 @@ function openInAppTerminal() {
     command: 'exec "${SHELL:-bash}" -i',
     cwd,
     createdAt: new Date(),
-    conversationId: props.conversationId || undefined,
+    workspaceId: props.workspaceId,
   };
   props.setEphemeralTerminals((prev) => [...prev, terminal]);
   terminalAutoFocusId.value = terminal.id;
@@ -2853,30 +2854,23 @@ watch(
   },
 );
 
-// Re-read cwd from localStorage when a quick action bumps the sync trigger.
+// Re-read the authoritative workspace path when a quick action changes it.
 watch(
   () => props.cwdSyncTrigger,
   (trigger) => {
     if (!trigger) return;
-    const stored = localStorage.getItem("shelley_selected_cwd");
-    if (stored) {
-      selectedCwd.value = stored;
+    if (props.mostRecentCwd) {
+      selectedCwd.value = props.mostRecentCwd;
       cwdInitialized.value = true;
     }
   },
 );
 
-// Initialize CWD: localStorage > mostRecentCwd > server default.
+// Initialize CWD from the active workspace, then the server default.
 watch(
   [() => props.mostRecentCwd, cwdInitialized],
   () => {
     if (cwdInitialized.value) return;
-    const storedCwd = localStorage.getItem("shelley_selected_cwd");
-    if (storedCwd) {
-      selectedCwd.value = storedCwd;
-      cwdInitialized.value = true;
-      return;
-    }
     if (props.mostRecentCwd) {
       selectedCwd.value = props.mostRecentCwd;
       cwdInitialized.value = true;

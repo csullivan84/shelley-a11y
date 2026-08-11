@@ -17,18 +17,19 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
-	srv, database, _ := newTestServer(t)
+func TestTerminalWorkspaceOwnershipAndCleanup(t *testing.T) {
+	srv, _, _ := newTestServer(t)
 	srv.terminals.SetSpawner(InProcessSpawner)
 
-	conversation, err := database.CreateConversation(context.Background(), nil, true, nil, nil, db.ConversationOptions{})
+	workspacePath := t.TempDir()
+	workspace, _, err := srv.ensureWorkspace(context.Background(), workspacePath, "terminal-test")
 	if err != nil {
-		t.Fatalf("create conversation: %v", err)
+		t.Fatalf("create workspace: %v", err)
 	}
-	owned, ownedClient, err := srv.terminals.SpawnForConversation(
-		conversation.ConversationID,
+	owned, ownedClient, err := srv.terminals.SpawnForWorkspace(
+		workspace.ID,
 		"sleep 60",
-		t.TempDir(),
+		workspacePath,
 		80,
 		24,
 		nil,
@@ -39,7 +40,7 @@ func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
 	_ = ownedClient.Close()
 	t.Cleanup(func() { _ = srv.terminals.KillMode(owned.ID, true) })
 
-	loose, looseClient, err := srv.terminals.Spawn("sleep 60", t.TempDir(), 80, 24, nil)
+	loose, looseClient, err := srv.terminals.SpawnForWorkspace(workspace.ID, "sleep 60", workspacePath, 80, 24, nil)
 	if err != nil {
 		t.Fatalf("spawn loose terminal: %v", err)
 	}
@@ -52,9 +53,9 @@ func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
 		t.Fatalf("list terminals: %d %s", listWriter.Code, listWriter.Body.String())
 	}
 	var listed []struct {
-		ID             string `json:"id"`
-		OwnerType      string `json:"owner_type"`
-		ConversationID string `json:"conversation_id"`
+		ID          string `json:"id"`
+		OwnerType   string `json:"owner_type"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if err := json.Unmarshal(listWriter.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode terminal list: %v", err)
@@ -63,7 +64,7 @@ func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
 	for _, item := range listed {
 		if item.ID == owned.ID {
 			foundOwned = true
-			if item.OwnerType != "conversation" || item.ConversationID != conversation.ConversationID {
+			if item.OwnerType != "workspace" || item.WorkspaceID != workspace.ID {
 				t.Fatalf("owned terminal metadata: %+v", item)
 			}
 		}
@@ -72,25 +73,37 @@ func TestTerminalOwnershipAndLooseCleanup(t *testing.T) {
 		t.Fatalf("owned terminal missing from list: %s", listWriter.Body.String())
 	}
 
-	looseReq := httptest.NewRequest(http.MethodGet, "/api/terminals/loose", nil)
+	looseReq := httptest.NewRequest(http.MethodGet, "/api/terminals/workspace", nil)
 	looseWriter := httptest.NewRecorder()
-	srv.handleLooseTerminals(looseWriter, looseReq)
-	if looseWriter.Code != http.StatusOK || !strings.Contains(looseWriter.Body.String(), loose.ID) {
-		t.Fatalf("loose list: %d %s", looseWriter.Code, looseWriter.Body.String())
+	srv.handleWorkspaceTerminals(looseWriter, looseReq)
+	if looseWriter.Code != http.StatusOK || !strings.Contains(looseWriter.Body.String(), loose.ID) || !strings.Contains(looseWriter.Body.String(), owned.ID) {
+		t.Fatalf("workspace list: %d %s", looseWriter.Code, looseWriter.Body.String())
 	}
 
-	cleanupReq := httptest.NewRequest(http.MethodDelete, "/api/terminals/loose", nil)
+	cleanupReq := httptest.NewRequest(http.MethodDelete, "/api/terminals/workspace", nil)
 	cleanupWriter := httptest.NewRecorder()
-	srv.handleLooseTerminalsDelete(cleanupWriter, cleanupReq)
+	srv.handleWorkspaceTerminalsDelete(cleanupWriter, cleanupReq)
 	if cleanupWriter.Code != http.StatusOK || !strings.Contains(cleanupWriter.Body.String(), loose.ID) {
 		t.Fatalf("loose cleanup: %d %s", cleanupWriter.Code, cleanupWriter.Body.String())
 	}
 	if srv.terminals.Alive(loose.ID) {
 		t.Fatalf("loose terminal survived cleanup: %s", loose.ID)
 	}
-	if !srv.terminals.Alive(owned.ID) {
-		t.Fatalf("conversation-owned terminal was cleaned up: %s", owned.ID)
+	if srv.terminals.Alive(owned.ID) {
+		t.Fatalf("workspace-owned terminal survived workspace cleanup: %s", owned.ID)
 	}
+}
+
+func testWorkspaceID(t *testing.T, h *TestHarness, path string) string {
+	t.Helper()
+	if path == "" {
+		path = t.TempDir()
+	}
+	workspace, _, err := h.server.ensureWorkspace(context.Background(), path, "")
+	if err != nil {
+		t.Fatalf("create terminal workspace: %v", err)
+	}
+	return workspace.ID
 }
 
 func TestExecTerminal_SimpleCommand(t *testing.T) {
@@ -103,7 +116,8 @@ func TestExecTerminal_SimpleCommand(t *testing.T) {
 	defer server.Close()
 
 	// Convert http to ws URL
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=echo+hello"
+	workspaceID := testWorkspaceID(t, h, "")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=echo+hello&workspace_id=" + url.QueryEscape(workspaceID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -169,7 +183,8 @@ func TestExecTerminal_FailingCommand(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=exit+42"
+	workspaceID := testWorkspaceID(t, h, "")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=exit+42&workspace_id=" + url.QueryEscape(workspaceID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -240,7 +255,8 @@ func TestExecTerminal_WorkingDirectory(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=pwd&cwd=/tmp"
+	workspaceID := testWorkspaceID(t, h, "/tmp")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=pwd&cwd=/tmp&workspace_id=" + url.QueryEscape(workspaceID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -288,7 +304,8 @@ func TestExecTerminal_Input(t *testing.T) {
 	defer server.Close()
 
 	// Use cat which echoes input
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=cat"
+	workspaceID := testWorkspaceID(t, h, "")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=cat&workspace_id=" + url.QueryEscape(workspaceID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -356,7 +373,8 @@ func TestExecTerminal_LoginShell(t *testing.T) {
 	defer server.Close()
 
 	// Test that bash runs as a login shell by checking the login_shell option
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=shopt+login_shell+%7C+grep+-q+on+%26%26+echo+login"
+	workspaceID := testWorkspaceID(t, h, "")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=shopt+login_shell+%7C+grep+-q+on+%26%26+echo+login&workspace_id=" + url.QueryEscape(workspaceID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -421,7 +439,8 @@ func TestExecTerminal_ControlCharacters(t *testing.T) {
 
 	// Use cat -v which renders control characters as ^X notation.
 	// Sending Ctrl-B (\x02) should appear as "^B" in the output.
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=cat+-v"
+	workspaceID := testWorkspaceID(t, h, "")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/exec-ws?cmd=cat+-v&workspace_id=" + url.QueryEscape(workspaceID)
 
 	// Generous overall deadline: under heavy CI load the pty spawn + first
 	// output can lag well past a second. We bound every Read on this single
@@ -499,6 +518,7 @@ func TestExecTerminal_ShelleyEnvVars(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") +
 		"/api/exec-ws?cmd=" + url.QueryEscape(cmd) +
 		"&cwd=" + url.QueryEscape(cwd) +
+		"&workspace_id=" + url.QueryEscape(testWorkspaceID(t, h, cwd)) +
 		"&conversation_id=" + url.QueryEscape(conv.ConversationID) +
 		"&model=predictable"
 

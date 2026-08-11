@@ -32,9 +32,10 @@ import (
 // sources never have to encode protocol details. Empty falls back to
 // the catalog's DefaultBaseURL, which is also a bare origin.
 type providerConn struct {
-	baseURL string
-	apiKey  string // "implicit" when credentials are injected at the network edge
-	headers http.Header
+	baseURL             string
+	apiKey              string // "implicit" when credentials are injected at the network edge
+	headers             http.Header
+	codexOAuthResponses bool
 }
 
 // Source is one origin from which built-in Shelley models can be
@@ -135,9 +136,10 @@ func OpenAICodex(accessToken, accountID string) Source {
 		label: "OpenAI Codex OAuth",
 		providers: map[models.Provider]*providerConn{
 			models.ProviderOpenAI: {
-				baseURL: "https://chatgpt.com/backend-api/codex",
-				apiKey:  accessToken,
-				headers: headers,
+				baseURL:             "https://chatgpt.com/backend-api/codex",
+				apiKey:              accessToken,
+				headers:             headers,
+				codexOAuthResponses: true,
 			},
 		},
 	}
@@ -242,7 +244,7 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 			// oaiResponsesSvc always appends /v1 for the public OpenAI API.
 			if responses, ok := svc.(*oai.ResponsesService); ok && conn.headers != nil {
 				responses.Headers = conn.headers.Clone()
-				if strings.Contains(conn.baseURL, "chatgpt.com/backend-api/codex") {
+				if conn.codexOAuthResponses {
 					responses.ModelURL = strings.TrimRight(conn.baseURL, "/")
 					responses.OmitMaxOutputTokens = true
 				}

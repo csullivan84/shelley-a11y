@@ -27,14 +27,13 @@ type TerminalSession struct {
 	ID      string `json:"id"`
 	Command string `json:"command"`
 	Cwd     string `json:"cwd"`
-	// ConversationID owns terminals opened from a conversation. Herd-owned
-	// terminals are associated through herd_members, while an empty value
-	// means the terminal is intentionally loose.
-	ConversationID string    `json:"conversation_id,omitempty"`
-	Socket         string    `json:"socket"`
-	LogFile        string    `json:"log_file"`
-	PID            int       `json:"pid"`
-	CreatedAt      time.Time `json:"created_at"`
+	// WorkspaceID owns ordinary terminals. Herd membership, when present,
+	// temporarily supersedes this owner without losing the terminal's origin.
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	Socket      string    `json:"socket"`
+	LogFile     string    `json:"log_file"`
+	PID         int       `json:"pid"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // SpawnerFunc starts a dtach server hosting `cmd` on the given socket. The
@@ -136,6 +135,7 @@ func (t *TerminalSessions) removeFiles(id string) {
 
 // List returns a snapshot of known live sessions, oldest first.
 func (t *TerminalSessions) List() []*TerminalSession {
+	t.Prune()
 	t.mu.Lock()
 	out := make([]*TerminalSession, 0, len(t.sessions))
 	for _, s := range t.sessions {
@@ -146,6 +146,23 @@ func (t *TerminalSessions) List() []*TerminalSession {
 	return out
 }
 
+// Prune removes records whose detached dtach process is no longer reachable.
+// It runs on every list so sessions that die after Shelley startup do not
+// remain indefinitely in the browser or on disk.
+func (t *TerminalSessions) Prune() {
+	t.mu.Lock()
+	sessions := make([]*TerminalSession, 0, len(t.sessions))
+	for _, session := range t.sessions {
+		sessions = append(sessions, session)
+	}
+	t.mu.Unlock()
+	for _, session := range sessions {
+		if !t.socketAlive(session.Socket) {
+			t.Forget(session.ID)
+		}
+	}
+}
+
 // Get returns a session by ID, or nil.
 func (t *TerminalSessions) Get(id string) *TerminalSession {
 	t.mu.Lock()
@@ -153,22 +170,12 @@ func (t *TerminalSessions) Get(id string) *TerminalSession {
 	return t.sessions[id]
 }
 
-// Spawn launches a new dtach-backed session, immediately attaches to it, and
-// returns the session record together with the attached client. Doing the
-// attach inline closes the race where a fast-exiting command tears down the
-// socket before any external attach can succeed.
-func (t *TerminalSessions) Spawn(command, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
-	return t.spawn(command, cwd, cols, rows, extraEnv, "")
+// SpawnForWorkspace launches an ordinary terminal owned by workspaceID.
+func (t *TerminalSessions) SpawnForWorkspace(workspaceID, command, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
+	return t.spawn(command, cwd, cols, rows, extraEnv, workspaceID)
 }
 
-// SpawnForConversation launches a terminal owned by conversationID. An empty
-// conversation ID creates a loose terminal, which can later be assigned to a
-// herd.
-func (t *TerminalSessions) SpawnForConversation(conversationID, command, cwd string, cols, rows uint16, extraEnv []string) (*TerminalSession, *dtach.Client, error) {
-	return t.spawn(command, cwd, cols, rows, extraEnv, conversationID)
-}
-
-func (t *TerminalSessions) spawn(command, cwd string, cols, rows uint16, extraEnv []string, conversationID string) (*TerminalSession, *dtach.Client, error) {
+func (t *TerminalSessions) spawn(command, cwd string, cols, rows uint16, extraEnv []string, workspaceID string) (*TerminalSession, *dtach.Client, error) {
 	if command == "" {
 		return nil, nil, errors.New("terminals: empty command")
 	}
@@ -204,14 +211,14 @@ func (t *TerminalSessions) spawn(command, cwd string, cols, rows uint16, extraEn
 	}
 
 	sess := &TerminalSession{
-		ID:             id,
-		Command:        command,
-		Cwd:            cwd,
-		ConversationID: conversationID,
-		Socket:         socket,
-		LogFile:        logFile,
-		PID:            pid,
-		CreatedAt:      time.Now().UTC(),
+		ID:          id,
+		Command:     command,
+		Cwd:         cwd,
+		WorkspaceID: workspaceID,
+		Socket:      socket,
+		LogFile:     logFile,
+		PID:         pid,
+		CreatedAt:   time.Now().UTC(),
 	}
 
 	data, err := json.MarshalIndent(sess, "", "  ")

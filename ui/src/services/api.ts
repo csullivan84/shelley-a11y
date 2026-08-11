@@ -50,8 +50,17 @@ export interface ProviderCandidate {
 export interface OnboardingStatus {
   complete: boolean;
   candidates: ProviderCandidate[];
+  discovery_warnings: string[];
   has_ready_models: boolean;
   models: AvailableModel[];
+}
+
+export interface Workspace {
+  id: string;
+  slug: string;
+  path: string;
+  created_at: string;
+  updated_at: string;
 }
 
 class ApiService {
@@ -119,6 +128,38 @@ class ApiService {
     if (!response.ok) {
       throw await responseError(response, "Failed to configure providers");
     }
+    return response.json();
+  }
+
+  async getWorkspaces(): Promise<Workspace[]> {
+    const response = await fetch(`${this.baseUrl}/workspaces`);
+    if (!response.ok) throw await responseError(response, "Failed to load workspaces");
+    return response.json();
+  }
+
+  async getWorkspace(slug: string): Promise<Workspace> {
+    const response = await fetch(`${this.baseUrl}/workspaces/${encodeURIComponent(slug)}`);
+    if (!response.ok) throw await responseError(response, "Failed to load workspace");
+    return response.json();
+  }
+
+  async ensureWorkspace(path: string, slug?: string): Promise<Workspace> {
+    const response = await fetch(`${this.baseUrl}/workspaces`, {
+      method: "POST",
+      headers: this.postHeaders,
+      body: JSON.stringify({ path, ...(slug ? { slug } : {}) }),
+    });
+    if (!response.ok) throw await responseError(response, "Failed to open workspace");
+    return response.json();
+  }
+
+  async renameWorkspace(currentSlug: string, slug: string): Promise<Workspace> {
+    const response = await fetch(`${this.baseUrl}/workspaces/${encodeURIComponent(currentSlug)}`, {
+      method: "PATCH",
+      headers: this.postHeaders,
+      body: JSON.stringify({ slug }),
+    });
+    if (!response.ok) throw await responseError(response, "Failed to rename workspace");
     return response.json();
   }
 
@@ -652,7 +693,7 @@ class ApiService {
     dir: string,
     query: string,
     signal?: AbortSignal,
-	limit?: number,
+    limit?: number,
   ): Promise<{
     dir: string;
     query: string;
@@ -662,7 +703,7 @@ class ApiService {
   }> {
     const params = new URLSearchParams({ dir });
     if (query) params.set("q", query);
-	if (limit) params.set("limit", String(limit));
+    if (limit) params.set("limit", String(limit));
     const response = await fetch(`${this.baseUrl}/find-files?${params.toString()}`, { signal });
     if (!response.ok) {
       throw await responseError(response, "Failed to find files");

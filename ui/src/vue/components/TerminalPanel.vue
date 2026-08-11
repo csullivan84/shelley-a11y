@@ -184,6 +184,7 @@
         :is-visible="t.id === activeTabId"
         :is-dark="isDark"
         :conversation-id="conversationId ?? null"
+        :workspace-id="workspaceId ?? null"
         :model="model ?? null"
         @status-change="handleStatusChange"
         @register="registerXterm"
@@ -225,6 +226,7 @@ const props = defineProps<{
   // initial spawn; reattaches use the env baked in when the session was
   // created.
   conversationId?: string | null;
+  workspaceId?: string | null;
   model?: string | null;
 }>();
 

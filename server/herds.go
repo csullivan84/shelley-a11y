@@ -224,6 +224,19 @@ func (s *Server) conversationExists(ctx context.Context, conversationID *string)
 	return false, err
 }
 
+func (s *Server) validateConversationReference(w http.ResponseWriter, ctx context.Context, conversationID *string, failureCode string, details map[string]any) bool {
+	exists, err := s.conversationExists(ctx, conversationID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, failureCode, err.Error(), details)
+		return false
+	}
+	if !exists {
+		writeAPIError(w, http.StatusUnprocessableEntity, "conversation_not_found", "linked conversation not found", nil)
+		return false
+	}
+	return true
+}
+
 func envToSlice(m map[string]string) []string {
 	if len(m) == 0 {
 		return nil
@@ -736,13 +749,7 @@ func (s *Server) handleAddMember(w http.ResponseWriter, r *http.Request, herdID 
 		writeAPIError(w, http.StatusBadRequest, "bad_request", "invalid JSON body", nil)
 		return
 	}
-	conversationExists, err := s.conversationExists(ctx, req.ConversationID)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "add_failed", err.Error(), map[string]any{"herd_id": herdID})
-		return
-	}
-	if !conversationExists {
-		writeAPIError(w, http.StatusUnprocessableEntity, "conversation_not_found", "linked conversation not found", nil)
+	if !s.validateConversationReference(w, ctx, req.ConversationID, "add_failed", map[string]any{"herd_id": herdID}) {
 		return
 	}
 
@@ -998,13 +1005,7 @@ func (s *Server) handlePatchMember(w http.ResponseWriter, r *http.Request, herdI
 		return
 	}
 	if !req.ClearConversation {
-		conversationExists, err := s.conversationExists(ctx, req.ConversationID)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "patch_failed", err.Error(), map[string]any{"member_id": memberID})
-			return
-		}
-		if !conversationExists {
-			writeAPIError(w, http.StatusUnprocessableEntity, "conversation_not_found", "linked conversation not found", nil)
+		if !s.validateConversationReference(w, ctx, req.ConversationID, "patch_failed", map[string]any{"member_id": memberID}) {
 			return
 		}
 	}
@@ -1240,7 +1241,29 @@ func (s *Server) openMember(ctx context.Context, h generated.Herd, m generated.H
 	for k, v := range recipe.Env {
 		env[k] = v
 	}
-	sess, dc, err := s.terminals.Spawn(recipe.Command, recipe.Cwd, 80, 24, envToSlice(env))
+	cwd := strings.TrimSpace(recipe.Cwd)
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			item.Outcome = "failed"
+			item.Error = "resolve herd terminal directory: " + err.Error()
+			return item
+		}
+	}
+	normalizedCwd, err := normalizeWorkspacePath(cwd)
+	if err != nil {
+		item.Outcome = "failed"
+		item.Error = err.Error()
+		return item
+	}
+	workspace, _, err := s.ensureWorkspace(ctx, normalizedCwd, "")
+	if err != nil {
+		item.Outcome = "failed"
+		item.Error = "create terminal workspace: " + err.Error()
+		return item
+	}
+	sess, dc, err := s.terminals.SpawnForWorkspace(workspace.ID, recipe.Command, normalizedCwd, 80, 24, envToSlice(env))
 	if err != nil {
 		item.Outcome = "failed"
 		item.Error = err.Error()
@@ -1481,9 +1504,9 @@ func runBounded[T any](items []T, concurrency int, fn func(T) bulkItemAPI) []bul
 	return out
 }
 
-// handleLooseTerminals lists live terminals without a conversation or herd
-// owner. These are the only sessions eligible for bulk loose cleanup.
-func (s *Server) handleLooseTerminals(w http.ResponseWriter, r *http.Request) {
+// handleWorkspaceTerminals lists every live terminal not currently assigned
+// to a herd. These sessions can be moved into a herd explicitly.
+func (s *Server) handleWorkspaceTerminals(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1491,12 +1514,12 @@ func (s *Server) handleLooseTerminals(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	owners, err := s.terminalOwners(ctx)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "list_loose_failed", err.Error(), nil)
+		writeAPIError(w, http.StatusInternalServerError, "list_workspace_terminals_failed", err.Error(), nil)
 		return
 	}
 	out := []terminalDTO{}
 	for _, t := range s.terminals.List() {
-		if t.ConversationID != "" || owners[t.ID].HerdID != "" {
+		if owners[t.ID].HerdID != "" {
 			continue
 		}
 		out = append(out, makeTerminalDTO(t, owners[t.ID]))

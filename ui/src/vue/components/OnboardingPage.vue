@@ -7,7 +7,14 @@
         Connect a model provider once, then use the ordinary message box for every request.
       </p>
 
-      <form @submit.prevent="complete">
+      <div v-if="status.discovery_warnings?.length" class="onboarding-warning" role="status">
+        <strong>Some provider settings could not be read.</strong>
+        <ul>
+          <li v-for="warning in status.discovery_warnings" :key="warning">{{ warning }}</li>
+        </ul>
+      </div>
+
+      <form @submit.prevent="complete()">
         <fieldset v-if="status.candidates.length" class="provider-group">
           <legend>Import providers found on this computer</legend>
           <p class="provider-help">
@@ -55,6 +62,15 @@
             :loading="submitting"
             :disabled="!canContinue || submitting"
           />
+          <Button
+            v-if="!canContinue"
+            type="button"
+            label="Continue without a provider"
+            severity="secondary"
+            :loading="submitting"
+            :disabled="submitting"
+            @click="complete(true)"
+          />
           <span v-if="status.has_ready_models" class="existing-provider-note">
             Shelley already has another ready provider, so importing is optional.
           </span>
@@ -81,8 +97,8 @@ const canContinue = computed(
   () => selected.value.length > 0 || openRouterKey.value.trim() !== "" || props.status.has_ready_models,
 );
 
-async function complete() {
-  if (!canContinue.value || submitting.value) return;
+async function complete(skipProvider = false) {
+  if ((!canContinue.value && !skipProvider) || submitting.value) return;
   submitting.value = true;
   error.value = null;
   try {
@@ -142,6 +158,19 @@ h1 {
   color: var(--text-color-secondary);
   font-size: 1.05rem;
   line-height: 1.5;
+}
+
+.onboarding-warning {
+  margin-bottom: 1.5rem;
+  padding: 0.8rem;
+  border: 1px solid var(--yellow-500, #d69e2e);
+  border-radius: 0.5rem;
+  color: var(--text-color-secondary);
+}
+
+.onboarding-warning ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
 }
 
 .provider-group {

@@ -48,6 +48,7 @@ const props = defineProps<{
   isVisible: boolean;
   isDark: boolean;
   conversationId?: string | null;
+  workspaceId?: string | null;
   model?: string | null;
 }>();
 
@@ -288,6 +289,7 @@ onMounted(() => {
     params.set("cwd", props.term.cwd);
   }
   if (props.conversationId) params.set("conversation_id", props.conversationId);
+  if (props.workspaceId) params.set("workspace_id", props.workspaceId);
   if (props.model) params.set("model", props.model);
   const wsUrl = `${protocol}//${window.location.host}/api/exec-ws?${params.toString()}`;
   ws = new WebSocket(wsUrl);

@@ -100,6 +100,31 @@ func TestImportRejectsStaleCandidate(t *testing.T) {
 	}
 }
 
+func TestDiscoverAvailableKeepsValidSources(t *testing.T) {
+	home := t.TempDir()
+	brokenHermes := filepath.Join(home, ".hermes", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(brokenHermes), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(brokenHermes, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(home, ".local", "share", "opencode", "auth.json"), map[string]any{
+		"opencode": map[string]any{"type": "api", "key": "valid-key"},
+	})
+
+	candidates, warnings, err := DiscoverAvailable(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != "opencode:opencode" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "Hermes") {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
 func writeFixture(t *testing.T, path string, value any) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

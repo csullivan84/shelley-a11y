@@ -160,6 +160,7 @@ const props = defineProps<{
   isOpen: boolean;
   conversations: ConversationWithState[];
   currentConversation: ConversationWithState | null;
+  cwd: string;
   hasCwd: boolean;
 }>();
 
@@ -275,7 +276,7 @@ watch(query, (q) => {
   }
 });
 
-// When the palette opens, look up git roots for the locally-selected cwd.
+// When the palette opens, look up git roots for the active workspace.
 watch(
   [() => props.isOpen, () => props.currentConversation],
   () => {
@@ -284,11 +285,7 @@ watch(
       newConvGitWorktreeRoot.value = null;
       return;
     }
-    const cwd =
-      props.currentConversation?.cwd ||
-      localStorage.getItem("shelley_selected_cwd") ||
-      window.__SHELLEY_INIT__?.default_cwd ||
-      null;
+    const cwd = props.cwd || null;
     if (!cwd) return;
     let cancelled = false;
     api
@@ -573,11 +570,7 @@ const actionItems = computed<CommandItem[]>(() => {
   const cwdRepoRoot = props.currentConversation?.git_repo_root || newConvGitRepoRoot.value;
   const cwdWorktreeRoot =
     props.currentConversation?.git_worktree_root || newConvGitWorktreeRoot.value;
-  const cwdNow =
-    props.currentConversation?.cwd ||
-    localStorage.getItem("shelley_selected_cwd") ||
-    window.__SHELLEY_INIT__?.default_cwd ||
-    null;
+  const cwdNow = props.cwd || null;
 
   if (cwdRepoRoot && cwdRepoRoot !== cwdNow) {
     items.push({

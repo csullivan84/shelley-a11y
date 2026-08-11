@@ -11,10 +11,11 @@ import (
 const onboardingSettingKey = "onboarding_complete"
 
 type onboardingResponse struct {
-	Complete       bool                     `json:"complete"`
-	Candidates     []providerauth.Candidate `json:"candidates"`
-	HasReadyModels bool                     `json:"has_ready_models"`
-	Models         []ModelInfo              `json:"models"`
+	Complete          bool                     `json:"complete"`
+	Candidates        []providerauth.Candidate `json:"candidates"`
+	DiscoveryWarnings []string                 `json:"discovery_warnings"`
+	HasReadyModels    bool                     `json:"has_ready_models"`
+	Models            []ModelInfo              `json:"models"`
 }
 
 func (s *Server) handleGetOnboarding(w http.ResponseWriter, r *http.Request) {
@@ -50,8 +51,8 @@ func (s *Server) handleCompleteOnboarding(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if preferred := providerauth.PreferredModel(providerConfig); preferred != "" && (s.defaultModel == "" || s.defaultModel == "predictable") {
-		s.defaultModel = preferred
+	if preferred := providerauth.PreferredModel(providerConfig); preferred != "" {
+		s.setImportedDefaultModel(preferred)
 	}
 	if err := s.db.SetSetting(r.Context(), onboardingSettingKey, "true"); err != nil {
 		http.Error(w, fmt.Sprintf("save onboarding state: %v", err), http.StatusInternalServerError)
@@ -71,16 +72,20 @@ func (s *Server) onboardingResponse(r *http.Request) (onboardingResponse, error)
 	if err != nil {
 		return onboardingResponse{}, fmt.Errorf("read onboarding state: %w", err)
 	}
-	candidates, err := providerauth.Discover(s.providerAuthHome)
+	candidates, warnings, err := providerauth.DiscoverAvailable(s.providerAuthHome)
 	if err != nil {
 		return onboardingResponse{}, err
 	}
 	modelList := s.getModelList()
+	if warnings == nil {
+		warnings = []string{}
+	}
 	markDefaultModel(modelList, s.effectiveDefaultModel(modelList))
 	response := onboardingResponse{
-		Complete:   value == "true",
-		Candidates: candidates,
-		Models:     modelList,
+		Complete:          value == "true",
+		Candidates:        candidates,
+		DiscoveryWarnings: warnings,
+		Models:            modelList,
 	}
 	for _, model := range modelList {
 		if model.Ready && model.ID != "predictable" {
@@ -89,4 +94,12 @@ func (s *Server) onboardingResponse(r *http.Request) (onboardingResponse, error)
 		}
 	}
 	return response, nil
+}
+
+func (s *Server) setImportedDefaultModel(model string) {
+	s.defaultModelMu.Lock()
+	defer s.defaultModelMu.Unlock()
+	if s.defaultModel == "" || s.defaultModel == "predictable" {
+		s.defaultModel = model
+	}
 }

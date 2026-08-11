@@ -69,11 +69,7 @@ func TestHerdAttachMoveDetachCloseReopen(t *testing.T) {
 	srv.terminals.SetSpawner(InProcessSpawner)
 
 	// Spawn a live terminal
-	sess, dc, err := srv.terminals.Spawn("sleep 300", t.TempDir(), 80, 24, nil)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	_ = dc.Close()
+	sess := spawnTestWorkspaceTerminal(t, srv, "sleep 300", t.TempDir())
 	termID := sess.ID
 
 	// Create two herds
@@ -154,9 +150,9 @@ func TestHerdAttachMoveDetachCloseReopen(t *testing.T) {
 	if !srv.terminals.Alive(termID) {
 		t.Fatal("detach killed the terminal")
 	}
-	req = httptest.NewRequest("GET", "/api/terminals/loose", nil)
+	req = httptest.NewRequest("GET", "/api/terminals/workspace", nil)
 	w = httptest.NewRecorder()
-	srv.handleLooseTerminals(w, req)
+	srv.handleWorkspaceTerminals(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("loose: %d %s", w.Code, w.Body.String())
 	}
@@ -242,11 +238,7 @@ func TestHerdOpenAllPartialResults(t *testing.T) {
 		t.Fatalf("clear recipe: %d %s", w.Code, w.Body.String())
 	}
 	// Live terminal attached → unchanged
-	sess, dc, err := srv.terminals.Spawn("sleep 60", t.TempDir(), 80, 24, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = dc.Close()
+	sess := spawnTestWorkspaceTerminal(t, srv, "sleep 60", t.TempDir())
 	addBody, _ := json.Marshal(map[string]any{"terminal_id": sess.ID, "label": "live"})
 	req = httptest.NewRequest("POST", "/api/herds/"+hID+"/members", bytes.NewReader(addBody))
 	req.SetPathValue("herd_id", hID)
@@ -340,11 +332,7 @@ func TestHerdCloseAllDoesNotCancelConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sess, dc, err := srv.terminals.Spawn("sleep 60", t.TempDir(), 80, 24, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = dc.Close()
+	sess := spawnTestWorkspaceTerminal(t, srv, "sleep 60", t.TempDir())
 	cid := conv.ConversationID
 	addBody, _ := json.Marshal(map[string]any{
 		"terminal_id":     sess.ID,
@@ -487,6 +475,20 @@ func createTestHerd(t *testing.T, srv *Server, name string) string {
 	var h herdAPI
 	_ = json.Unmarshal(w.Body.Bytes(), &h)
 	return h.ID
+}
+
+func spawnTestWorkspaceTerminal(t *testing.T, srv *Server, command, cwd string) *TerminalSession {
+	t.Helper()
+	workspace, _, err := srv.ensureWorkspace(t.Context(), cwd, "")
+	if err != nil {
+		t.Fatalf("create terminal workspace: %v", err)
+	}
+	session, client, err := srv.terminals.SpawnForWorkspace(workspace.ID, command, cwd, 80, 24, nil)
+	if err != nil {
+		t.Fatalf("spawn terminal: %v", err)
+	}
+	_ = client.Close()
+	return session
 }
 
 func addRecipeMember(t *testing.T, srv *Server, herdID, label string, recipe recipeAPI) herdMemberAPI {

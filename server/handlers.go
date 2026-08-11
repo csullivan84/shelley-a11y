@@ -511,7 +511,7 @@ func (s *Server) staticHandler(fsys http.FileSystem) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Inject initialization data into index.html
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" || isConversationSlugPath(r.URL.Path) || isSPARoute(r.URL.Path) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" || isConversationSlugPath(r.URL.Path) || isWorkspaceSlugPath(r.URL.Path) || isSPARoute(r.URL.Path) {
 			indexHandler.ServeHTTP(w, r)
 			return
 		}
@@ -2650,10 +2650,13 @@ func (s *Server) effectiveDefaultModel(modelList []ModelInfo) string {
 	if len(modelList) == 0 {
 		return ""
 	}
-	if s.defaultModel != "" {
+	s.defaultModelMu.RLock()
+	configured := s.defaultModel
+	s.defaultModelMu.RUnlock()
+	if configured != "" {
 		for _, m := range modelList {
-			if m.ID == s.defaultModel && m.Ready {
-				return s.defaultModel
+			if m.ID == configured && m.Ready {
+				return configured
 			}
 		}
 	}

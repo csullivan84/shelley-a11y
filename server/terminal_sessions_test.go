@@ -58,3 +58,18 @@ func TestSpawnSubprocessReapsChild(t *testing.T) {
 	}
 	t.Fatalf("child pid %d was not reaped", pid)
 }
+
+func TestTerminalListPrunesDeadSessions(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := NewTerminalSessions(dir, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &TerminalSession{
+		ID: "tdead", Socket: filepath.Join(dir, "missing.sock"), LogFile: filepath.Join(dir, "tdead.log"),
+	}
+	ts.sessions[session.ID] = session
+	if got := ts.List(); len(got) != 0 {
+		t.Fatalf("dead terminal remained in list: %+v", got)
+	}
+}

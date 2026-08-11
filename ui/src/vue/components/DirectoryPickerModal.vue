@@ -405,8 +405,18 @@ function handleInputKeyDown(e: KeyboardEvent) {
 }
 
 function handleSelect() {
-  const { dirPath } = parseInputPath(inputPath.value);
-  const selectedPath = inputPath.value.endsWith("/") ? (dirPath === "/" ? "/" : dirPath) : dirPath;
+  const { dirPath, prefix } = parseInputPath(inputPath.value);
+  const exactDirectory =
+    prefix &&
+    displayDir.value?.path === (dirPath || "/") &&
+    displayDir.value.entries.some((entry) => entry.is_dir && entry.name === prefix);
+  const selectedPath = exactDirectory
+    ? inputPath.value
+    : inputPath.value.endsWith("/")
+      ? dirPath === "/"
+        ? "/"
+        : dirPath
+      : dirPath;
   emit("select", selectedPath || displayDir.value?.path || "");
   emit("close");
 }

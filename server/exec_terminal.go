@@ -45,6 +45,7 @@ func (s *Server) handleExecWS(w http.ResponseWriter, r *http.Request) {
 	cmd := q.Get("cmd")
 	cwd := q.Get("cwd")
 	conversationID := q.Get("conversation_id")
+	workspaceID := q.Get("workspace_id")
 	model := q.Get("model")
 	userEmail := r.Header.Get("X-ExeDev-Email")
 
@@ -87,7 +88,19 @@ func (s *Server) handleExecWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	extraEnv := buildTerminalEnv(conversationID, slug, model, userEmail, cwd, s.listenPort)
-	sess, dc, err := s.attachOrSpawn(termID, cmd, cwd, cols, rows, extraEnv, conversationID)
+	if termID == "" {
+		workspace, workspaceErr := s.workspaceForTerminal(ctx, workspaceID, cwd)
+		if workspaceErr != nil {
+			_ = wsjson.Write(ctx, conn, ExecMessage{Type: "error", Data: workspaceErr.Error()})
+			_ = conn.Close(websocket.StatusPolicyViolation, "invalid workspace")
+			return
+		}
+		workspaceID = workspace.ID
+		if cwd == "" {
+			cwd = workspace.Path
+		}
+	}
+	sess, dc, err := s.attachOrSpawn(termID, cmd, cwd, cols, rows, extraEnv, workspaceID)
 	if err != nil {
 		wsjson.Write(ctx, conn, ExecMessage{Type: "error", Data: err.Error()})
 		conn.Close(websocket.StatusInternalError, "attach failed")
@@ -121,7 +134,7 @@ func buildTerminalEnv(conversationID, slug, model, userEmail, cwd string, listen
 	}.Environ(cwd)
 }
 
-func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extraEnv []string, conversationID string) (*TerminalSession, *dtach.Client, error) {
+func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extraEnv []string, workspaceID string) (*TerminalSession, *dtach.Client, error) {
 	unlock := s.terminals.LockAttach()
 	defer unlock()
 	if termID != "" {
@@ -138,7 +151,7 @@ func (s *Server) attachOrSpawn(termID, cmd, cwd string, cols, rows uint16, extra
 		}
 		return nil, nil, fmt.Errorf("unknown terminal id %s", termID)
 	}
-	return s.terminals.SpawnForConversation(conversationID, cmd, cwd, cols, rows, extraEnv)
+	return s.terminals.SpawnForWorkspace(workspaceID, cmd, cwd, cols, rows, extraEnv)
 }
 
 // bridgeWS shuttles bytes between the browser websocket and the dtach client.
@@ -235,19 +248,19 @@ type terminalOwner struct {
 }
 
 type terminalDTO struct {
-	ID             string `json:"id"`
-	Command        string `json:"command"`
-	Cwd            string `json:"cwd"`
-	CreatedAt      string `json:"created_at"`
-	OwnerType      string `json:"owner_type"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	HerdID         string `json:"herd_id,omitempty"`
-	HerdName       string `json:"herd_name,omitempty"`
+	ID          string `json:"id"`
+	Command     string `json:"command"`
+	Cwd         string `json:"cwd"`
+	CreatedAt   string `json:"created_at"`
+	OwnerType   string `json:"owner_type"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	HerdID      string `json:"herd_id,omitempty"`
+	HerdName    string `json:"herd_name,omitempty"`
 }
 
-// terminalOwners returns the herd assignment for each live terminal. Direct
-// conversation ownership lives on the terminal session itself; herd
-// ownership lives in the database so detach/move operations remain atomic.
+// terminalOwners returns the herd assignment for each live terminal. Workspace
+// ownership lives on the terminal session; herd ownership lives in the
+// database so detach/move operations remain atomic.
 func (s *Server) terminalOwners(ctx context.Context) (map[string]terminalOwner, error) {
 	owners := make(map[string]terminalOwner)
 	err := s.db.WithTx(ctx, func(q *generated.Queries) error {
@@ -278,23 +291,21 @@ func (s *Server) terminalOwners(ctx context.Context) (map[string]terminalOwner, 
 }
 
 func makeTerminalDTO(t *TerminalSession, owner terminalOwner) terminalDTO {
-	ownerType := "loose"
-	conversationID := ""
+	ownerType := "workspace"
 	if owner.HerdID != "" {
 		ownerType = "herd"
-	} else if t.ConversationID != "" {
-		ownerType = "conversation"
-		conversationID = t.ConversationID
+	} else if t.WorkspaceID == "" {
+		ownerType = "unowned"
 	}
 	return terminalDTO{
-		ID:             t.ID,
-		Command:        t.Command,
-		Cwd:            t.Cwd,
-		CreatedAt:      t.CreatedAt.UTC().Format(time.RFC3339),
-		OwnerType:      ownerType,
-		ConversationID: conversationID,
-		HerdID:         owner.HerdID,
-		HerdName:       owner.HerdName,
+		ID:          t.ID,
+		Command:     t.Command,
+		Cwd:         t.Cwd,
+		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
+		OwnerType:   ownerType,
+		WorkspaceID: t.WorkspaceID,
+		HerdID:      owner.HerdID,
+		HerdName:    owner.HerdName,
 	}
 }
 
@@ -312,27 +323,25 @@ func (s *Server) handleTerminalDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleLooseTerminalsDelete closes every live terminal without an owner.
-// Herd and conversation-owned terminals require their owning context for
-// disposal and are never included in this bulk operation.
-func (s *Server) handleLooseTerminalsDelete(w http.ResponseWriter, r *http.Request) {
+// handleWorkspaceTerminalsDelete closes every non-herd terminal. It reports
+// all outcomes so one failed process cannot hide terminals already closed.
+func (s *Server) handleWorkspaceTerminalsDelete(w http.ResponseWriter, r *http.Request) {
 	owners, err := s.terminalOwners(r.Context())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "list_terminal_owners_failed", err.Error(), nil)
 		return
 	}
 	closed := make([]string, 0)
+	failed := make(map[string]string)
 	for _, terminal := range s.terminals.List() {
-		if terminal.ConversationID != "" || owners[terminal.ID].HerdID != "" {
+		if owners[terminal.ID].HerdID != "" {
 			continue
 		}
 		if err := s.terminals.Kill(terminal.ID); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "close_loose_failed", err.Error(), map[string]any{
-				"terminal_id": terminal.ID,
-			})
-			return
+			failed[terminal.ID] = err.Error()
+			continue
 		}
 		closed = append(closed, terminal.ID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"closed": closed})
+	writeJSON(w, http.StatusOK, map[string]any{"closed": closed, "failed": failed})
 }
