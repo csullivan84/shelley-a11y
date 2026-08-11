@@ -2313,6 +2313,7 @@ async function sendMessage(message: string) {
           "/",
         createdAt: new Date(),
         workspaceId: props.workspaceId,
+        model: selectedModel.value,
       };
       props.setEphemeralTerminals((prev) => [...prev, terminal]);
       const firstWord = shellCommand.split(/\s+/)[0];
@@ -2320,8 +2321,8 @@ async function sendMessage(message: string) {
       const interactiveShells = ["bash", "sh", "zsh", "fish", "nu", "nushell"];
       if (interactiveShells.includes(baseName)) {
         terminalAutoFocusId.value = terminal.id;
+        props.onTerminalAutoFocus?.(terminal.id);
       }
-      props.onTerminalAutoFocus?.(terminal.id);
       setTimeout(() => scrollToBottom(), 100);
     }
     return;
@@ -2455,6 +2456,7 @@ function openInAppTerminal() {
     cwd,
     createdAt: new Date(),
     workspaceId: props.workspaceId,
+    model: selectedModel.value,
   };
   props.setEphemeralTerminals((prev) => [...prev, terminal]);
   terminalAutoFocusId.value = terminal.id;

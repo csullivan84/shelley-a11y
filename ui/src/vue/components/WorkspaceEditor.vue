@@ -89,10 +89,14 @@ import { api } from "../../services/api";
 import { loadMonaco } from "../../services/monaco";
 import { isDarkModeActive } from "../../services/theme";
 
-const props = defineProps<{
-  cwd: string;
-  openRequest?: { path: string; nonce: number } | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    cwd: string;
+    openRequest?: { path: string; nonce: number } | null;
+    active?: boolean;
+  }>(),
+  { active: true },
+);
 const emit = defineEmits<{
   comment: [text: string];
   saved: [path: string];
@@ -226,7 +230,7 @@ async function showActiveFile() {
     editor.value.setModel(model);
     const state = viewStates.get(path);
     if (state) editor.value.restoreViewState(state);
-    editor.value.focus();
+    if (props.active) editor.value.focus();
     switchingModel = false;
     contentListener?.dispose();
     contentListener = model.onDidChangeContent(() => {
@@ -351,6 +355,12 @@ watch(
   { immediate: true },
 );
 watch(activePath, () => void showActiveFile());
+watch(
+  () => props.active,
+  (active) => {
+    if (active && activePath.value) nextTick(() => editor.value?.focus());
+  },
+);
 watch(
   () => props.openRequest,
   (request) => {

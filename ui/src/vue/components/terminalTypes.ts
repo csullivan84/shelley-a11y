@@ -15,6 +15,7 @@ export interface EphemeralTerminal {
   // websocket re-attaches rather than spawning a new session.
   termId?: string;
   workspaceId?: string;
+  model?: string;
   herdId?: string;
   herdName?: string;
 }

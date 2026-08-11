@@ -71,6 +71,10 @@ body {
   --link-color: #2563eb;
   --green-600: #16a34a;
   --green-700: #15803d;
+  --retro-amber-glow: rgba(217, 119, 6, 0.1);
+  --retro-green-glow: rgba(22, 163, 74, 0.08);
+  --retro-grid-line: rgba(37, 99, 235, 0.045);
+  --retro-scanline: rgba(17, 24, 39, 0.025);
   --gray-50: #f9fafb;
   --gray-100: #f3f4f6;
   --gray-200: #e5e7eb;
@@ -107,6 +111,10 @@ body {
   --blue-border: rgba(59, 130, 246, 0.3);
   --blue-text: #93c5fd;
   --link-color: #60a5fa;
+  --retro-amber-glow: rgba(251, 191, 36, 0.08);
+  --retro-green-glow: rgba(74, 222, 128, 0.07);
+  --retro-grid-line: rgba(96, 165, 250, 0.055);
+  --retro-scanline: rgba(0, 0, 0, 0.12);
 }
 
 /* Layout */

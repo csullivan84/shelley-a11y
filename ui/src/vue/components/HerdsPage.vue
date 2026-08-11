@@ -237,6 +237,7 @@
               </template>
               <template v-else-if="m.process_state === 'closed' && detail.lifecycle === 'active'">
                 <button type="button" @click="openMember(m)">Open</button>
+                <button type="button" @click="repairMember(m)">Repair recipe</button>
                 <button type="button" @click="removeMember(m)">Remove</button>
               </template>
               <template v-else-if="m.process_state === 'missing' && detail.lifecycle === 'active'">

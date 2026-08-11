@@ -4,6 +4,7 @@
       class="workspace-workbench-editor"
       :cwd="cwd"
       :open-request="openRequest"
+      :active="active"
       @comment="emit('comment', $event)"
       @saved="emit('saved', $event)"
     />
@@ -32,6 +33,7 @@ import type { EphemeralTerminal } from "./terminalTypes";
 defineProps<{
   cwd: string;
   openRequest?: { path: string; nonce: number } | null;
+  active?: boolean;
   terminals: EphemeralTerminal[];
   conversationId?: string | null;
   workspaceId?: string;

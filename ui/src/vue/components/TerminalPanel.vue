@@ -185,7 +185,7 @@
         :is-dark="isDark"
         :conversation-id="conversationId ?? null"
         :workspace-id="workspaceId ?? null"
-        :model="model ?? null"
+        :model="t.model || model || null"
         @status-change="handleStatusChange"
         @register="registerXterm"
         @unregister="unregisterXterm"

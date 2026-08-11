@@ -25,7 +25,7 @@
     <section v-show="activePane === 'chat'" class="workspace-view workspace-chat-pane" aria-label="Shelley conversation">
       <slot />
     </section>
-    <section v-if="activePane === 'files'" class="workspace-view workspace-files-pane" aria-label="Workspace files">
+    <section v-show="activePane === 'files'" class="workspace-view workspace-files-pane" aria-label="Workspace files">
       <WorkspaceNavigator
         class="workspace-pane"
         :cwd="cwd"
@@ -35,7 +35,7 @@
       />
     </section>
     <section v-show="activePane === 'workbench'" class="workspace-view workspace-workbench-pane" aria-label="Workbench">
-      <slot name="workbench" :open-request="effectiveOpenRequest" />
+      <slot name="workbench" :open-request="effectiveOpenRequest" :active="activePane === 'workbench'" />
     </section>
   </div>
 </template>
@@ -93,13 +93,49 @@ watch(
 
 <style scoped>
 .workspace-shell {
+  position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(circle at 12% 18%, var(--retro-amber-glow), transparent 34%),
+    radial-gradient(circle at 88% 76%, var(--retro-green-glow), transparent 38%),
+    linear-gradient(var(--retro-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--retro-grid-line) 1px, transparent 1px),
+    repeating-linear-gradient(
+      0deg,
+      var(--retro-scanline) 0,
+      var(--retro-scanline) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  background-size: auto, auto, 32px 32px, 32px 32px, auto;
+}
+
+.workspace-shell::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 9.75rem;
+  right: 1.25rem;
+  width: 5rem;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #5aa44a 0 20%,
+    #f1c232 20% 40%,
+    #e69138 40% 60%,
+    #cc4125 60% 80%,
+    #674ea7 80% 100%
+  );
+  box-shadow: 0 0 10px var(--retro-amber-glow);
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 .workspace-view,
@@ -110,6 +146,8 @@ watch(
 
 .workspace-view {
   flex: 1;
+  position: relative;
+  z-index: 1;
 }
 
 .workspace-chat-pane {
@@ -123,6 +161,8 @@ watch(
 }
 
 .workspace-tabs {
+  position: relative;
+  z-index: 3;
   display: flex;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
@@ -141,5 +181,22 @@ watch(
 .workspace-tabs button.active {
   border-color: var(--accent, #3b82f6);
   color: var(--text-primary);
+}
+
+@media (max-width: 600px) {
+  .workspace-shell::after {
+    right: 0.75rem;
+    width: 3rem;
+  }
+}
+
+@media (forced-colors: active) {
+  .workspace-shell {
+    background-image: none;
+  }
+
+  .workspace-shell::after {
+    display: none;
+  }
 }
 </style>

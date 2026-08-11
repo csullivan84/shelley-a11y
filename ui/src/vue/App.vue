@@ -86,7 +86,6 @@
           :workspace="currentWorkspace"
           :workspaces="workspaces"
           :open-request="workspaceOpenRequest"
-          @comment="onEditorComment"
           @change-directory="changeWorkspaceDirectory"
           @select-workspace="selectWorkspaceById"
           @open-diff="diffViewerTrigger++"
@@ -126,10 +125,11 @@
             :on-conversation-unarchived="handleConversationUnarchived"
             :external-comment-text="editorCommentText"
           />
-          <template #workbench="{ openRequest }">
+          <template #workbench="{ openRequest, active }">
             <WorkspaceWorkbench
               :cwd="workspaceCwd"
               :open-request="openRequest"
+              :active="active"
               :terminals="conversationTerminals"
               :conversation-id="currentConversationId"
               :workspace-id="currentWorkspace?.id"
@@ -911,6 +911,7 @@ function selectWorkspaceById(id: string) {
 // ChatInterface for injection into the message input.
 function onEditorComment(text: string) {
   editorCommentText.value = { text };
+  workspacePane.value = "chat";
 }
 
 async function handleFirstMessage(
