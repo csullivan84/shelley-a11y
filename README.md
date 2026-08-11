@@ -46,24 +46,18 @@ VaxTui makes Herds accessible through semantic controls, status announcements, a
 ## Pre-Built Binaries (macOS/Linux)
 
 ```bash
-curl -Lo shelley "https://github.com/boldsoftware/shelley/releases/latest/download/shelley_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x shelley
+curl -Lo shelley "https://github.com/csullivan84/VaxTui/releases/latest/download/shelley_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && chmod +x shelley
 ```
 
-The binaries are on the [releases page](https://github.com/boldsoftware/shelley/releases/latest).
-
-## Homebrew (macOS)
-
-```bash
-brew install --cask boldsoftware/tap/shelley
-```
+The binaries are on the [VaxTui releases page](https://github.com/csullivan84/VaxTui/releases/latest).
 
 ## Build from Source
 
 You'll need Go and Node.
 
 ```bash
-git clone https://github.com/boldsoftware/shelley.git
-cd shelley
+git clone https://github.com/csullivan84/VaxTui.git
+cd VaxTui
 make
 ```
 
