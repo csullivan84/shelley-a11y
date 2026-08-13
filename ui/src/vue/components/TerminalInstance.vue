@@ -79,28 +79,32 @@ let ws: WebSocket | null = null;
 let ro: ResizeObserver | null = null;
 let handlePointerDown: ((e: PointerEvent) => void) | null = null;
 let handleShellFocus: (() => void) | null = null;
+let handleShellBlur: (() => void) | null = null;
 let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
 let liveOutputTimer: ReturnType<typeof setTimeout> | null = null;
 let liveOutputWindow: TerminalLiveOutputWindow | null = null;
-let liveOutputPaused = false;
-let lastAnnouncedLen = 0;
+let liveOutputPaused = true;
 
-function pauseTerminalLiveOutput() {
+function stopTerminalLiveOutput(announce: boolean) {
   if (!xtermInst) return;
   liveOutputPaused = true;
+  if (liveOutputTimer) clearTimeout(liveOutputTimer);
   liveOutputTimer = null;
+  liveOutputWindow = null;
   // Disposing xterm's accessibility manager prevents it from accumulating a
   // huge silent live-region value that would all be read when resumed. The
   // separate output log remains available for manual review.
   xtermInst.options.screenReaderMode = false;
-  announceA11y(
-    "Terminal live output paused after 20 seconds. Refocus the shell to resume, or Tab to Terminal output to read.",
-  );
+  if (announce) {
+    announceA11y(
+      "Terminal live output paused after 20 seconds. Refocus the shell to resume, or Tab to Terminal output to read.",
+    );
+  }
 }
 
 function checkTerminalLiveOutput() {
   if (liveOutputWindow && shouldPauseTerminalLiveOutput(liveOutputWindow, Date.now())) {
-    pauseTerminalLiveOutput();
+    stopTerminalLiveOutput(true);
     return;
   }
   liveOutputTimer = null;
@@ -140,21 +144,7 @@ function scheduleMirrorRefresh(xterm: Terminal) {
   mirrorTimer = setTimeout(() => {
     mirrorTimer = null;
     const text = readBufferAll(xterm);
-    const prevLen = bufferText.value.length;
     bufferText.value = text;
-    // Announce growth so VO knows output arrived even if focus is on the shell.
-    if (!liveOutputPaused && text.length > lastAnnouncedLen + 20 && text.length > prevLen) {
-      const added = text.slice(Math.max(0, prevLen)).trim();
-      if (added) {
-        const lineCount = added.split("\n").filter(Boolean).length;
-        announceA11y(
-          lineCount > 3
-            ? `Terminal output: ${lineCount} new lines. Tab to Terminal output to read.`
-            : `Terminal output: ${added.slice(0, 200)}`,
-        );
-        lastAnnouncedLen = text.length;
-      }
-    }
   }, 80);
 }
 
@@ -213,16 +203,16 @@ function onOutputLogKeydown(e: KeyboardEvent) {
 onMounted(() => {
   if (!containerRef.value) return;
 
-  // screenReaderMode: xterm a11y rows + live region (short bursts). We still
-  // mirror the full buffer into a real <pre> because bulk ls output is muted
-  // by xterm's "too much output" live-region cap.
+  // Enable xterm's live region only while the shell has focus. A hidden or
+  // background terminal must never interrupt navigation elsewhere in Shelley.
+  // The full buffer remains available in the explicit read-only output log.
   const xterm = new Terminal({
     cursorBlink: true,
     fontSize: 14,
     fontFamily: 'Consolas, "Liberation Mono", Menlo, Courier, monospace',
     theme: getTerminalTheme(props.isDark),
     scrollback: 10000,
-    screenReaderMode: true,
+    screenReaderMode: false,
     // Kitty keyboard protocol — clients opt in via `CSI = u` so this is safe to leave on.
     vtExtensions: { kittyKeyboard: true },
   } as ConstructorParameters<typeof Terminal>[0]);
@@ -306,7 +296,9 @@ onMounted(() => {
   emit("register", props.term.id, xterm);
 
   handleShellFocus = resumeTerminalLiveOutput;
+  handleShellBlur = () => stopTerminalLiveOutput(false);
   xterm.textarea?.addEventListener("focus", handleShellFocus);
+  xterm.textarea?.addEventListener("blur", handleShellBlur);
 
   // Keep the plain-text mirror in sync whenever the viewport paints.
   xterm.onRender(() => scheduleMirrorRefresh(xterm));
@@ -416,6 +408,7 @@ onUnmounted(() => {
     containerRef.value.removeEventListener("pointerdown", handlePointerDown);
   }
   if (handleShellFocus) xtermInst?.textarea?.removeEventListener("focus", handleShellFocus);
+  if (handleShellBlur) xtermInst?.textarea?.removeEventListener("blur", handleShellBlur);
   ws?.close();
   xtermInst?.dispose();
   emit("unregister", props.term.id);
