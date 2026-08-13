@@ -13,6 +13,34 @@ export function base64ToUint8Array(base64String: string): Uint8Array {
 
 export type TermStatus = "connecting" | "running" | "exited" | "error";
 
+export const TERMINAL_LIVE_OUTPUT_LIMIT_MS = 20_000;
+export const TERMINAL_LIVE_OUTPUT_IDLE_MS = 1_000;
+
+export interface TerminalLiveOutputWindow {
+  startedAt: number;
+  lastOutputAt: number;
+}
+
+export function recordTerminalLiveOutput(
+  current: TerminalLiveOutputWindow | null,
+  now: number,
+): TerminalLiveOutputWindow {
+  if (!current || now - current.lastOutputAt > TERMINAL_LIVE_OUTPUT_IDLE_MS) {
+    return { startedAt: now, lastOutputAt: now };
+  }
+  return { ...current, lastOutputAt: now };
+}
+
+export function shouldPauseTerminalLiveOutput(
+  current: TerminalLiveOutputWindow,
+  now: number,
+): boolean {
+  return (
+    now - current.startedAt >= TERMINAL_LIVE_OUTPUT_LIMIT_MS &&
+    now - current.lastOutputAt <= TERMINAL_LIVE_OUTPUT_IDLE_MS
+  );
+}
+
 // Theme colors for xterm.js
 export function getTerminalTheme(isDark: boolean): Record<string, string> {
   if (isDark) {

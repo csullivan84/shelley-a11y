@@ -40,7 +40,15 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { EphemeralTerminal } from "./terminalTypes";
-import { getTerminalTheme, base64ToUint8Array, type TermStatus } from "./terminalHelpers";
+import {
+  getTerminalTheme,
+  base64ToUint8Array,
+  recordTerminalLiveOutput,
+  shouldPauseTerminalLiveOutput,
+  TERMINAL_LIVE_OUTPUT_LIMIT_MS,
+  type TerminalLiveOutputWindow,
+  type TermStatus,
+} from "./terminalHelpers";
 import { announceA11y } from "../../services/a11yAnnouncer";
 
 const props = defineProps<{
@@ -70,8 +78,51 @@ let fitAddon: FitAddon | null = null;
 let ws: WebSocket | null = null;
 let ro: ResizeObserver | null = null;
 let handlePointerDown: ((e: PointerEvent) => void) | null = null;
+let handleShellFocus: (() => void) | null = null;
 let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+let liveOutputTimer: ReturnType<typeof setTimeout> | null = null;
+let liveOutputWindow: TerminalLiveOutputWindow | null = null;
+let liveOutputPaused = false;
 let lastAnnouncedLen = 0;
+
+function pauseTerminalLiveOutput() {
+  if (!xtermInst) return;
+  liveOutputPaused = true;
+  liveOutputTimer = null;
+  // Disposing xterm's accessibility manager prevents it from accumulating a
+  // huge silent live-region value that would all be read when resumed. The
+  // separate output log remains available for manual review.
+  xtermInst.options.screenReaderMode = false;
+  announceA11y(
+    "Terminal live output paused after 20 seconds. Refocus the shell to resume, or Tab to Terminal output to read.",
+  );
+}
+
+function checkTerminalLiveOutput() {
+  if (liveOutputWindow && shouldPauseTerminalLiveOutput(liveOutputWindow, Date.now())) {
+    pauseTerminalLiveOutput();
+    return;
+  }
+  liveOutputTimer = null;
+  liveOutputWindow = null;
+}
+
+function trackTerminalLiveOutput() {
+  if (liveOutputPaused) return;
+  const previousStartedAt = liveOutputWindow?.startedAt;
+  liveOutputWindow = recordTerminalLiveOutput(liveOutputWindow, Date.now());
+  if (previousStartedAt === liveOutputWindow.startedAt) return;
+  if (liveOutputTimer) clearTimeout(liveOutputTimer);
+  liveOutputTimer = setTimeout(checkTerminalLiveOutput, TERMINAL_LIVE_OUTPUT_LIMIT_MS);
+}
+
+function resumeTerminalLiveOutput() {
+  if (!liveOutputPaused || !xtermInst) return;
+  liveOutputPaused = false;
+  liveOutputWindow = null;
+  xtermInst.options.screenReaderMode = true;
+  announceA11y("Terminal live output resumed.");
+}
 
 function readBufferAll(xterm: Terminal): string {
   const lines: string[] = [];
@@ -92,7 +143,7 @@ function scheduleMirrorRefresh(xterm: Terminal) {
     const prevLen = bufferText.value.length;
     bufferText.value = text;
     // Announce growth so VO knows output arrived even if focus is on the shell.
-    if (text.length > lastAnnouncedLen + 20 && text.length > prevLen) {
+    if (!liveOutputPaused && text.length > lastAnnouncedLen + 20 && text.length > prevLen) {
       const added = text.slice(Math.max(0, prevLen)).trim();
       if (added) {
         const lineCount = added.split("\n").filter(Boolean).length;
@@ -254,6 +305,9 @@ onMounted(() => {
   fitAddon.fit();
   emit("register", props.term.id, xterm);
 
+  handleShellFocus = resumeTerminalLiveOutput;
+  xterm.textarea?.addEventListener("focus", handleShellFocus);
+
   // Keep the plain-text mirror in sync whenever the viewport paints.
   xterm.onRender(() => scheduleMirrorRefresh(xterm));
   xterm.onWriteParsed(() => scheduleMirrorRefresh(xterm));
@@ -304,6 +358,7 @@ onMounted(() => {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === "output" && msg.data) {
+        trackTerminalLiveOutput();
         xterm.write(base64ToUint8Array(msg.data));
         scheduleMirrorRefresh(xterm);
       } else if (msg.type === "attached" && msg.term_id) {
@@ -356,9 +411,11 @@ onMounted(() => {
 onUnmounted(() => {
   ro?.disconnect();
   if (mirrorTimer) clearTimeout(mirrorTimer);
+  if (liveOutputTimer) clearTimeout(liveOutputTimer);
   if (handlePointerDown && containerRef.value) {
     containerRef.value.removeEventListener("pointerdown", handlePointerDown);
   }
+  if (handleShellFocus) xtermInst?.textarea?.removeEventListener("focus", handleShellFocus);
   ws?.close();
   xtermInst?.dispose();
   emit("unregister", props.term.id);
