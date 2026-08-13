@@ -84,6 +84,11 @@ let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
 let liveOutputTimer: ReturnType<typeof setTimeout> | null = null;
 let liveOutputWindow: TerminalLiveOutputWindow | null = null;
 let liveOutputPaused = true;
+let liveOutputCapped = false;
+
+function liveOutputPauseSeconds() {
+  return TERMINAL_LIVE_OUTPUT_LIMIT_MS / 1000;
+}
 
 function stopTerminalLiveOutput(announce: boolean) {
   if (!xtermInst) return;
@@ -96,8 +101,9 @@ function stopTerminalLiveOutput(announce: boolean) {
   // separate output log remains available for manual review.
   xtermInst.options.screenReaderMode = false;
   if (announce) {
+    liveOutputCapped = true;
     announceA11y(
-      "Terminal live output paused after 20 seconds. Refocus the shell to resume, or Tab to Terminal output to read.",
+      `Terminal live output paused after ${liveOutputPauseSeconds()} seconds. Press Escape to resume, or Tab to Terminal output to read.`,
     );
   }
 }
@@ -122,10 +128,12 @@ function trackTerminalLiveOutput() {
 
 function resumeTerminalLiveOutput() {
   if (!liveOutputPaused || !xtermInst) return;
+  const announce = liveOutputCapped;
   liveOutputPaused = false;
+  liveOutputCapped = false;
   liveOutputWindow = null;
   xtermInst.options.screenReaderMode = true;
-  announceA11y("Terminal live output resumed.");
+  if (announce) announceA11y("Terminal live output resumed.");
 }
 
 function readBufferAll(xterm: Terminal): string {
@@ -233,10 +241,14 @@ onMounted(() => {
       return false;
     }
 
-    // Escape: leave the terminal panel entirely.
+    // Escape: after a live-output cap, resume in place. Otherwise leave.
     if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       e.stopPropagation();
+      if (liveOutputCapped) {
+        resumeTerminalLiveOutput();
+        return false;
+      }
       leaveTerminalForward();
       return false;
     }

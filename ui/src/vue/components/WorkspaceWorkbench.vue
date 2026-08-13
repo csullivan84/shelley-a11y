@@ -5,6 +5,7 @@
       :cwd="cwd"
       :open-request="openRequest"
       :active="active"
+      :auto-focus-id="autoFocusId"
       @comment="emit('comment', $event)"
       @saved="emit('saved', $event)"
     />
@@ -14,6 +15,7 @@
         :conversation-id="conversationId"
         :workspace-id="workspaceId"
         :auto-focus-id="autoFocusId"
+        :active="active"
         :can-insert-into-input="true"
         @attached="(id, termId) => emit('attached', id, termId)"
         @close="emit('close', $event)"

@@ -8,24 +8,39 @@
       @select-workspace="emit('select-workspace', $event)"
       @refresh="refreshNonce++"
     />
-    <nav class="workspace-tabs" role="tablist" aria-label="Workspace view">
+    <nav class="workspace-tabs" role="tablist" aria-label="Workspace view" @keydown="onTabListKeydown">
       <button
         v-for="pane in panes"
+        :id="tabId(pane)"
         :key="pane"
         type="button"
         role="tab"
+        :tabindex="activePane === pane ? 0 : -1"
         :aria-selected="activePane === pane"
+        :aria-controls="panelId(pane)"
         :class="{ active: activePane === pane }"
-        @click="activePane = pane"
+        @click="selectPane(pane)"
       >
         {{ paneLabels[pane] }}
       </button>
     </nav>
 
-    <section v-show="activePane === 'chat'" class="workspace-view workspace-chat-pane" aria-label="Shelley conversation">
+    <section
+      v-show="activePane === 'chat'"
+      :id="panelId('chat')"
+      role="tabpanel"
+      :aria-labelledby="tabId('chat')"
+      class="workspace-view workspace-chat-pane"
+    >
       <slot />
     </section>
-    <section v-show="activePane === 'files'" class="workspace-view workspace-files-pane" aria-label="Workspace files">
+    <section
+      v-show="activePane === 'files'"
+      :id="panelId('files')"
+      role="tabpanel"
+      :aria-labelledby="tabId('files')"
+      class="workspace-view workspace-files-pane"
+    >
       <WorkspaceNavigator
         class="workspace-pane"
         :cwd="cwd"
@@ -34,14 +49,25 @@
         @open-diff="emit('open-diff')"
       />
     </section>
-    <section v-show="activePane === 'workbench'" class="workspace-view workspace-workbench-pane" aria-label="Workbench">
-      <slot name="workbench" :open-request="effectiveOpenRequest" :active="activePane === 'workbench'" />
+    <section
+      v-show="activePane === 'workbench'"
+      :id="panelId('workbench')"
+      role="tabpanel"
+      :aria-labelledby="tabId('workbench')"
+      class="workspace-view workspace-workbench-pane"
+    >
+      <slot
+        name="workbench"
+        :open-request="effectiveOpenRequest"
+        :active="activePane === 'workbench'"
+        :on-saved="refreshFiles"
+      />
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import WorkspaceControls from "./WorkspaceControls.vue";
 import WorkspaceNavigator from "./WorkspaceNavigator.vue";
 import type { Workspace } from "../../services/api";
@@ -75,6 +101,38 @@ const activePane = computed({
 });
 const refreshNonce = ref(0);
 const effectiveOpenRequest = ref<{ path: string; nonce: number } | null>(null);
+
+function tabId(pane: WorkspacePane) {
+  return `workspace-tab-${pane}`;
+}
+
+function panelId(pane: WorkspacePane) {
+  return `workspace-panel-${pane}`;
+}
+
+function selectPane(pane: WorkspacePane) {
+  activePane.value = pane;
+}
+
+function refreshFiles() {
+  refreshNonce.value++;
+}
+
+function onTabListKeydown(event: KeyboardEvent) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
+    return;
+  }
+  event.preventDefault();
+  const current = panes.indexOf(activePane.value);
+  const last = panes.length - 1;
+  let next = current;
+  if (event.key === "ArrowRight") next = current === last ? 0 : current + 1;
+  else if (event.key === "ArrowLeft") next = current <= 0 ? last : current - 1;
+  else if (event.key === "Home") next = 0;
+  else next = last;
+  selectPane(panes[next]);
+  void nextTick(() => document.getElementById(tabId(panes[next]))?.focus());
+}
 
 function openFile(path: string) {
   effectiveOpenRequest.value = { path, nonce: Date.now() };
@@ -157,7 +215,16 @@ watch(
 
 .workspace-files-pane,
 .workspace-workbench-pane {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+.workspace-files-pane .workspace-pane,
+.workspace-workbench-pane > :deep(.workspace-workbench) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 .workspace-tabs {

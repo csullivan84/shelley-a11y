@@ -94,8 +94,9 @@ const props = withDefaults(
     cwd: string;
     openRequest?: { path: string; nonce: number } | null;
     active?: boolean;
+    autoFocusId?: string | null;
   }>(),
-  { active: true },
+  { active: true, autoFocusId: null },
 );
 const emit = defineEmits<{
   comment: [text: string];
@@ -230,7 +231,7 @@ async function showActiveFile() {
     editor.value.setModel(model);
     const state = viewStates.get(path);
     if (state) editor.value.restoreViewState(state);
-    if (props.active) editor.value.focus();
+    if (props.active && !props.autoFocusId) editor.value.focus();
     switchingModel = false;
     contentListener?.dispose();
     contentListener = model.onDidChangeContent(() => {
@@ -355,12 +356,6 @@ watch(
   { immediate: true },
 );
 watch(activePath, () => void showActiveFile());
-watch(
-  () => props.active,
-  (active) => {
-    if (active && activePath.value) nextTick(() => editor.value?.focus());
-  },
-);
 watch(
   () => props.openRequest,
   (request) => {

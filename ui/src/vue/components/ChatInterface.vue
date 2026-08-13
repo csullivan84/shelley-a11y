@@ -2316,13 +2316,8 @@ async function sendMessage(message: string) {
         model: selectedModel.value,
       };
       props.setEphemeralTerminals((prev) => [...prev, terminal]);
-      const firstWord = shellCommand.split(/\s+/)[0];
-      const baseName = firstWord.split("/").pop() || firstWord;
-      const interactiveShells = ["bash", "sh", "zsh", "fish", "nu", "nushell"];
-      if (interactiveShells.includes(baseName)) {
-        terminalAutoFocusId.value = terminal.id;
-        props.onTerminalAutoFocus?.(terminal.id);
-      }
+      terminalAutoFocusId.value = terminal.id;
+      props.onTerminalAutoFocus?.(terminal.id);
       setTimeout(() => scrollToBottom(), 100);
     }
     return;

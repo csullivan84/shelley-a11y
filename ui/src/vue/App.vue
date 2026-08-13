@@ -125,7 +125,7 @@
             :on-conversation-unarchived="handleConversationUnarchived"
             :external-comment-text="editorCommentText"
           />
-          <template #workbench="{ openRequest, active }">
+          <template #workbench="{ openRequest, active, onSaved }">
             <WorkspaceWorkbench
               :cwd="workspaceCwd"
               :open-request="openRequest"
@@ -135,6 +135,7 @@
               :workspace-id="currentWorkspace?.id"
               :auto-focus-id="terminalAutoFocusId"
               @comment="onEditorComment"
+              @saved="onSaved"
               @attached="handleTerminalAttached"
               @close="handleTerminalClose"
               @insert-into-input="handleTerminalInsert"

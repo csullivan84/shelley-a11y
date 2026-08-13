@@ -219,6 +219,8 @@ export type { EphemeralTerminal } from "./terminalTypes";
 const props = defineProps<{
   terminals: EphemeralTerminal[];
   autoFocusId?: string | null;
+  // When false, the workbench is hidden and chords must not act on it.
+  active?: boolean;
   // Mirrors the presence of React's onInsertIntoInput callback, which gates
   // the insert buttons. When false the insert actions are not rendered.
   canInsertIntoInput?: boolean;
@@ -615,6 +617,7 @@ function onTabKeydown(e: KeyboardEvent, id: string, idx: number) {
 // Global chords while any terminal exists. Shift+Ctrl avoids clobbering shell
 // readline (Ctrl+W = kill-word, Ctrl+[ = esc, etc.).
 function onPanelShortcut(e: KeyboardEvent) {
+  if (props.active === false) return;
   if (props.terminals.length === 0) return;
   if (e.type !== "keydown") return;
   // Need Ctrl (or Meta on Mac for consistency we accept both) + Shift.
